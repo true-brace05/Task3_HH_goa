@@ -579,7 +579,7 @@ Safeguards implemented:
 
 ## Git
 
-Commit: TBD (to be committed)
+Commit: `61263882f572a4adaf429ae26a624152aa6c6e86`
 Branch: `feature/visual-search-poc`
 
 ---
@@ -588,12 +588,13 @@ Branch: `feature/visual-search-poc`
 
 | Metric | Value |
 |--------|-------|
-| Total Commits | 5 (including Phase 5) |
+| Total Commits | 6 (including Phase 5) |
 | Branch | `feature/visual-search-poc` |
 | Phase 1 Commit | `06afd98` |
 | Phase 2 Commit | `90a6aeac3cae97f54851a9d983ff313e4dbbd15` |
 | Phase 3 Commit | `df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10` |
 | Phase 4 Commit | `7b3058631195cfd88a8384e5de4baac46d6365f1` |
+| Phase 5 Commit | `61263882f572a4adaf429ae26a624152aa6c6e86` |
 | Phase 5 Branch | `feature/visual-search-poc` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
