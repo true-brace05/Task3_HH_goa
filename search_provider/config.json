@@ -1,0 +1,33 @@
+{
+  "name": "runtime-image-search-provider",
+  "version": "1.0.0",
+  "description": "Runtime image search provider for Microsoft Foundry",
+  "default_provider": "microsoft-foundry",
+  "providers": {
+    "dockerhub": {
+      "registry": "docker.io",
+      "priority": 3,
+      "description": "Docker Hub public registry"
+    },
+    "azurecr": {
+      "registry": "azurecr.io",
+      "priority": 2,
+      "description": "Azure Container Registry"
+    },
+    "microsoft-foundry": {
+      "registry": "mcr.microsoft.com",
+      "priority": 1,
+      "description": "Microsoft Foundry runtime images"
+    },
+    "mcr": {
+      "registry": "mcr.microsoft.com",
+      "priority": 1,
+      "description": "Microsoft Container Registry"
+    }
+  },
+  "search_criteria": {
+    "default_max_size_mb": 10000,
+    "default_frameworks": ["pytorch", "tensorflow", "openai", "vllm"],
+    "default_status": "available"
+  }
+}
