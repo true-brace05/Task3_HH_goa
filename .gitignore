@@ -13,5 +13,6 @@ build/
 data/input/query.jpg
 search_results.json
 data/candidates/
-data/debug/candidate_manifest.json
+data/debug/
+data/test_faces/
 test_visual_e2e.py
