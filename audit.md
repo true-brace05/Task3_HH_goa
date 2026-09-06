@@ -134,7 +134,7 @@ Prepare for normalization + candidate retrieval.
 
 ## Git
 
-Commit: `884197189028ecc8d7327c68a0f8691baec1fcfb`
+Commit: `90a6aeac3cae97f54851a9d983ff313e4dbbd15`
 Push: SUCCESS
 
 ---
@@ -146,7 +146,7 @@ Push: SUCCESS
 | Total Commits | 2 |
 | Branch | `feature/search-poc` |
 | Phase 1 Commit | `06afd98` |
-| Phase 2 Commit | `884197189028ecc8d7327c68a0f8691baec1fcfb` |
+| Phase 2 Commit | `90a6aeac3cae97f54851a9d983ff313e4dbbd15` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
 
