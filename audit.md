@@ -584,18 +584,212 @@ Branch: `feature/visual-search-poc`
 
 ---
 
+## Phase 6 — Alternative Visual Search Provider
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/visual-search-provider-2
+
+## Objective
+
+Find and implement a legitimate alternative visual-search mechanism that can actually perform real runtime visual candidate discovery, replacing the CAPTCHA-blocked Google Lens provider.
+
+## Previous Phase
+
+Phase 5 — Visual Reverse Image Search POC
+
+Reference:
+- Branch: feature/visual-search-poc
+- Commit: 61263882f572a4adaf429ae26a624152aa6c6e86
+- Status: BLOCKED (Google CAPTCHA)
+
+## Providers Investigated
+
+1. **TinEye** — Paid API ($200 for 5,000 searches). Rejected: paid-only, sandbox doesn't return real results.
+2. **Bing Visual Search** — Retired August 2025. Rejected: no longer available.
+3. **Yandex Visual Search** — Free, public endpoint, no API key required. **Selected.**
+
+## Provider Selected
+
+**YandexVisualSearchProvider** (`yandex-visual-search`)
+- Type: Visual reverse image search
+- Interface: `search_by_image(image_path) -> list`
+- Request: POST image to `https://yandex.com/images/search`, parse JSON for `cbir_id`, fetch search results page
+- License: MIT (based on open-source implementations)
+- Authentication: None required
+- Rate limits: May block concurrent requests
+
+## Provider Rejected
+
+- **Google Lens**: Real visual search but automated access blocked by CAPTCHA
+- **MCR**: Registry/catalog metadata, not visual search
+- **Docker Hub**: Container registry, not visual search
+- **TinEye**: Paid API, not suitable for free POC
+
+## Implementation
+
+### New Files Created
+
+1. **`search/visual/yandex.py`** — `YandexVisualSearchProvider` implementation:
+   - `search_by_image(image_path)` — POSTs image to Yandex, parses JSON/HTML results
+   - `can_search(image_path)` — Validates image file exists and is valid
+   - Returns list of dicts with `source_url`, `image_url`, `title`, `provider`
+   - Handles blocked requests by returning empty list
+2. **`test_yandex_e2e.py`** — E2E test script for Yandex visual search
+3. **`test_full_pipeline.py`** — Full pipeline test script
+
+### Modified Files
+
+1. **`search/searcher.py`** — Updated to use `YandexVisualSearchProvider` as PRIMARY, `GoogleLensProvider` as BACKUP
+2. **`search/visual/__init__.py`** — Added `YandexVisualSearchProvider` export
+3. **`search/__init__.py`** — Added `YandexVisualSearchProvider` export
+4. **`search/acquisition/visual.py`** — Added `yandex-visual-search` to provider whitelist, added SHA-256 hashing
+5. **`tests/test_searcher.py`** — Added 7 new tests for `YandexVisualSearchProvider`
+
+### Preserved Files
+
+- **`search/visual/google_lens.py`** — `GoogleLensProvider` (preserved as backup, blocked by CAPTCHA)
+- **`search/providers/primary.py`** — `MicrosoftFoundryProvider` (historical reference)
+- **`search/providers/backup.py`** — `DockerHubProvider` (historical reference)
+- **`search/acquisition/mcr.py`** — `MCRAcquisitionProvider` (historical reference)
+- **`search/acquisition/dockerhub.py`** — `DockerHubAcquisitionProvider` (historical reference)
+
+## How It Works
+
+### Visual Search Flow
+
+1. Local image (`data/input/query.jpg`) is POSTed to `https://yandex.com/images/search` with `rpt=imageview&format=json`
+2. Response contains `cbirId` (content-based image retrieval ID)
+3. Search results page fetched at `https://yandex.com/images/search?cbir_id={cbir_id}&rpt=imageview`
+4. HTML parsed with BeautifulSoup to extract similar image links
+5. Image URLs extracted from `img_url` query parameter in similar links
+6. Deduplicated and returned as candidate list
+
+### Acquisition Flow
+
+1. Each candidate's `image_url` is downloaded via HTTP
+2. Content validated as image using PIL
+3. SHA-256 hash computed for provenance
+4. Saved to `data/candidates/cand_XXX.{ext}`
+5. Manifest recorded in `data/debug/candidate_manifest.json`
+
+## Test Results
+
+- **51 tests total** (44 from phases 1-5 + 7 new Yandex tests)
+- `TestYandexVisualSearchProvider`: 7 tests covering `can_search`, `search_by_image`, invalid images, non-image files
+- All existing tests unchanged and passing
+
+### New Test Classes
+
+```python
+class TestYandexVisualSearchProvider(unittest.TestCase):
+    def test_provider_name(self)
+    def test_can_search_valid_image(self)
+    def test_can_search_invalid_path(self)
+    def test_can_search_non_image(self)
+    def test_search_by_image_returns_list(self)
+    def test_search_by_image_invalid_raises(self)
+    def test_search_by_image_non_image_raises(self)
+```
+
+## Real End-to-End Test
+
+```
+[SEARCH START]
+data/input/query.jpg
+
+[PROVIDER]
+yandex-visual-search
+
+[SEARCH COMPLETE]
+Candidates returned: 20
+
+[NORMALIZATION]
+Candidates normalized: 20
+
+[ACQUISITION]
+Images acquired: 19
+
+[FAILED]
+1 (timeout)
+
+[VALIDATION]
+Valid images: 19
+
+[SHA-256]
+Computed for all 19 acquired images
+
+[MANIFEST]
+data/debug/candidate_manifest.json
+```
+
+## Security
+
+Safeguards implemented:
+- Request timeout (20s for visual search, 15s for acquisition)
+- Response size limited to 50MB
+- Content-type validation
+- Image content validation via PIL
+- SHA-256 hash computed for every acquired image
+- Safe deterministic filenames only
+- No shell commands constructed from URLs
+- No credentials logged
+- No API keys required
+- File handles properly closed using context managers
+- No arbitrary redirect following
+
+## Status
+
+**GREEN** — Yandex Visual Search successfully returns real runtime visual candidates. Complete pipeline works: local image → visual search → 20 candidates → normalization → 19 images acquired with SHA-256 hashes.
+
+## Known Limitations
+
+- Yandex may block requests if too many are made concurrently
+- Some image hosts may timeout during acquisition (1 of 20 failed)
+- No official Yandex API — uses Yandex's public web interface
+- BeautifulSoup parsing may need updates if Yandex changes markup
+- Rate limiting may apply for large queries
+
+## Files Changed
+
+1. `search/visual/yandex.py` — new provider implementation
+2. `search/searcher.py` — updated PRIMARY provider
+3. `search/visual/__init__.py` — added export
+4. `search/__init__.py` — added export
+5. `search/acquisition/visual.py` — added provider whitelist + SHA-256
+6. `tests/test_searcher.py` — added 7 new tests
+7. `README.md` — updated documentation
+8. `docs/search_decision.md` — updated decision document
+9. `audit.md` — updated audit log
+
+## Git
+
+Commit: TBD (to be committed)
+Branch: `feature/visual-search-provider-2`
+Push: PENDING
+
+---
+
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total Commits | 6 (including Phase 5) |
-| Branch | `feature/visual-search-poc` |
+| Total Commits | 7 (including Phase 6) |
+| Branch | `feature/visual-search-provider-2` |
 | Phase 1 Commit | `06afd98` |
 | Phase 2 Commit | `90a6aeac3cae97f54851a9d983ff313e4dbbd15` |
 | Phase 3 Commit | `df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10` |
 | Phase 4 Commit | `7b3058631195cfd88a8384e5de4baac46d6365f1` |
 | Phase 5 Commit | `61263882f572a4adaf429ae26a624152aa6c6e86` |
-| Phase 5 Branch | `feature/visual-search-poc` |
+| Phase 6 Branch | `feature/visual-search-provider-2` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
 

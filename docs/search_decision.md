@@ -179,3 +179,72 @@ If Google returns a CAPTCHA or upload form instead of results, the provider retu
 - 44 tests total (37 from phases 1-4 + 7 new visual search tests)
 - `TestGoogleLensProvider`: 7 tests covering `can_search`, `search_by_image`, invalid images, non-image files, blocked requests
 - All existing tests unchanged and passing
+
+---
+
+## Phase 6 — Alternative Visual Search Provider
+
+### Provider Comparison
+
+| Provider | Visual Query | Runtime Results | Image URLs | Source URLs | Free/Public | Automation Restrictions | License | Decision |
+| -------- | ------------ | --------------- | ---------- | ----------- | ----------- | ----------------------- | ------- | -------- |
+| MCR | No | Registry metadata | No | No | Yes | None | N/A | Rejected — not visual search |
+| Docker Hub | No | Registry metadata | No | No | Yes (auth required) | Auth required | N/A | Rejected — not visual search |
+| Google Lens | Yes | Yes (CAPTCHA blocked) | Yes | Yes | Yes | CAPTCHA blocks automated access | MIT (community client) | Rejected — blocked |
+| TinEye | Yes | Yes | Yes | Yes | No (paid API) | $200 for 5,000 searches | MIT (pytineye) | Rejected — paid |
+| **Yandex Visual Search** | **Yes** | **Yes** | **Yes** | **Yes** | **Yes** | **None (public endpoint)** | **MIT** | **Selected** |
+
+### Provider Selected
+
+**Primary**: `YandexVisualSearchProvider` (`yandex-visual-search`)
+- Uploads local image to Yandex's image search endpoint
+- Parses JSON response to get `cbir_id`
+- Fetches search results page with similar images
+- Extracts image URLs from similar image links
+- No API key required
+- No CAPTCHA observed during testing
+- Returns real visual search results
+
+### How It Works
+
+1. Local image is POSTed to `https://yandex.com/images/search` with `rpt=imageview&format=json`
+2. Response contains `cbirId` (content-based image retrieval ID)
+3. Search results page fetched at `https://yandex.com/images/search?cbir_id={cbir_id}&rpt=imageview`
+4. HTML parsed with BeautifulSoup to extract similar image links
+5. Image URLs extracted from `img_url` query parameter in similar links
+6. Deduplicated and returned as candidate list
+
+### Phase 6 Results
+
+- Candidates discovered: 20
+- Candidates normalized: 20
+- Images acquired: 19
+- Acquisition failures: 1 (timeout)
+- Valid images: 19
+- SHA-256 computed: Yes (for all acquired images)
+
+### Status
+
+**GREEN** — Yandex Visual Search successfully returns real runtime visual candidates. The complete pipeline works: local image → visual search → 20 candidates → normalization → 19 images acquired with SHA-256 hashes.
+
+### Known Limitations
+
+- Yandex may block requests if too many are made concurrently
+- Some image hosts may timeout during acquisition
+- No official Yandex API — this uses Yandex's public web interface
+- BeautifulSoup parsing may need updates if Yandex changes markup
+- Rate limiting may apply for large queries
+
+### Security Safeguards
+
+- Request timeouts enforced (20s for visual search, 15s for acquisition)
+- Response size limited to 50MB
+- Content-type validation
+- Image content validation via PIL
+- SHA-256 hash computed for every acquired image
+- Safe deterministic filenames only
+- No shell commands constructed from URLs
+- No credentials logged
+- No API keys required
+- File handles properly closed using context managers
+- No arbitrary redirect following

@@ -7,11 +7,12 @@ from typing import List
 import requests
 
 from search.visual.google_lens import GoogleLensProvider
+from search.visual.yandex import YandexVisualSearchProvider
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_PROVIDER = GoogleLensProvider()
-BACKUP_PROVIDER = None
+PRIMARY_PROVIDER = YandexVisualSearchProvider()
+BACKUP_PROVIDER = GoogleLensProvider()
 
 
 def _validate_image(image_path: str) -> Path:

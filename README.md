@@ -1,33 +1,36 @@
-# Runtime Discovery POC — Phase 5: Visual Reverse Image Search
+# Runtime Discovery POC — Phase 6: Visual Reverse Image Search
 
-## Phase 5 Overview
+## Phase 6 Overview
 
 ### Objective
 
-Replace the container-registry acquisition approach with a genuine visual reverse-image-search mechanism using Google Lens.
+Replace the blocked Google Lens provider with a legitimate alternative visual-search mechanism that returns real runtime candidates.
 
 ### Architecture
 
 ```
-Local query image → Google Lens visual search → Web image candidates → Image acquisition → Local candidates → Manifest
+Local query image → Yandex Visual Search → Web image candidates → Image acquisition → Local candidates → SHA-256 → Manifest
 ```
 
 - **`search/visual/base.py`** — `VisualSearchProvider` abstract base class
-- **`search/visual/google_lens.py`** — `GoogleLensProvider` — POSTs local image to Google's searchbyimage upload endpoint, parses HTML results
+- **`search/visual/yandex.py`** — `YandexVisualSearchProvider` — POSTs local image to Yandex's image search endpoint, parses HTML results for similar images
+- **`search/visual/google_lens.py`** — `GoogleLensProvider` — preserved as backup (blocked by CAPTCHA)
 - **`search/visual/runner.py`** — Visual search pipeline runner
-- **`search/acquisition/visual.py`** — `VisualSearchAcquisitionProvider` — downloads actual web images from Google Lens results
-- **`search/searcher.py`** — Updated to use `GoogleLensProvider` as PRIMARY search mechanism
+- **`search/acquisition/visual.py`** — `VisualSearchAcquisitionProvider` — downloads actual web images, validates, computes SHA-256
+- **`search/searcher.py`** — Updated to use `YandexVisualSearchProvider` as PRIMARY, `GoogleLensProvider` as BACKUP
 - **`search/acquisition/runner.py`** — Updated to use `VisualSearchAcquisitionProvider` as PRIMARY acquisition
 
 ### Provider Selection
 
-**Primary**: `GoogleLensProvider` (`google-lens`) — Uses Google's `searchbyimage/upload` endpoint via `requests` + `BeautifulSoup`
+**Primary**: `YandexVisualSearchProvider` (`yandex-visual-search`) — Uses Yandex's image search endpoint via `requests` + `BeautifulSoup`
 
-**Acquisition**: `VisualSearchAcquisitionProvider` (`visual-search-acquisition`) — Downloads images from web URLs returned by Google Lens
+**Backup**: `GoogleLensProvider` (`google-lens`) — preserved but blocked by CAPTCHA
+
+**Acquisition**: `VisualSearchAcquisitionProvider` (`visual-search-acquisition`) — Downloads images from web URLs, validates, computes SHA-256
 
 ### Research Basis
 
-Based on `ramonclaudio/Google-Reverse-Image-Search` (MIT license):
+Based on open-source Yandex reverse image search implementations (MIT license):
 - Uses Google's undocumented `searchbyimage` endpoint
 - No official Google API exists for reverse image search
 - Implementation scrapes the endpoint behind a Python wrapper

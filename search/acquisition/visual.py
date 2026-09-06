@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from pathlib import Path
 from typing import Dict, Any
@@ -23,7 +24,7 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
         if not candidate.get("image_url"):
             return False
         provider = candidate.get("provider", "")
-        return provider in ("google-lens", "visual-search") or "google" in candidate.get("image_url", "")
+        return provider in ("google-lens", "yandex-visual-search", "visual-search") or "google" in candidate.get("image_url", "") or "yandex" in candidate.get("image_url", "")
 
     def acquire(self, candidate: dict) -> dict:
         candidate_id = candidate.get("candidate_id", "unknown")
@@ -116,6 +117,8 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
         with open(local_path, "wb") as f:
             f.write(content)
 
+        content_sha256 = hashlib.sha256(content).hexdigest()
+
         logger.info("Saved image to %s", local_path)
         return {
             "candidate_id": candidate["candidate_id"],
@@ -124,6 +127,7 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
             "local_path": str(local_path),
             "content_type": content_type,
             "file_size": size,
+            "content_sha256": content_sha256,
             "source_url": candidate.get("source_url"),
             "image_url": candidate.get("image_url"),
         }
