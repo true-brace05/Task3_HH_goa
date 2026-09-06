@@ -21,10 +21,24 @@ from search.acquisition.dockerhub import DockerHubAcquisitionProvider
 from search.visual.google_lens import GoogleLensProvider
 from search.visual.yandex import YandexVisualSearchProvider
 
+# Ensure query image exists for tests: use committed fixture if runtime file missing (data/input/query.jpg is gitignored)
+_FIXTURE_QUERY = Path("tests/fixtures/query.jpg")
+_DEFAULT_QUERY = Path("data/input/query.jpg")
+if not _DEFAULT_QUERY.exists() and _FIXTURE_QUERY.exists():
+    try:
+        _DEFAULT_QUERY.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+
+        shutil.copy(_FIXTURE_QUERY, _DEFAULT_QUERY)
+    except Exception:
+        pass
+
+QUERY_IMAGE = str(_DEFAULT_QUERY) if _DEFAULT_QUERY.exists() else str(_FIXTURE_QUERY)
+
 
 class TestValidateImage(unittest.TestCase):
     def test_valid_image(self):
-        path = Path("data/input/query.jpg")
+        path = Path(QUERY_IMAGE)
         result = _validate_image(str(path))
         self.assertEqual(result.name, "query.jpg")
 
@@ -94,7 +108,7 @@ class TestDockerHubProvider(unittest.TestCase):
 
 class TestSearcher(unittest.TestCase):
     def test_search_image_valid(self):
-        results = search_image("data/input/query.jpg")
+        results = search_image(QUERY_IMAGE)
         self.assertIsInstance(results, list)
 
     def test_search_image_missing(self):
@@ -353,7 +367,7 @@ class TestGoogleLensProvider(unittest.TestCase):
         self.assertEqual(self.provider.name, "google-lens")
 
     def test_can_search_valid_image(self):
-        result = self.provider.can_search("data/input/query.jpg")
+        result = self.provider.can_search(QUERY_IMAGE)
         self.assertTrue(result)
 
     def test_can_search_invalid_path(self):
@@ -371,7 +385,7 @@ class TestGoogleLensProvider(unittest.TestCase):
             os.unlink(tmp.name)
 
     def test_search_by_image_returns_list(self):
-        results = self.provider.search_by_image("data/input/query.jpg")
+        results = self.provider.search_by_image(QUERY_IMAGE)
         self.assertIsInstance(results, list)
 
     def test_search_by_image_invalid_raises(self):
@@ -397,7 +411,7 @@ class TestYandexVisualSearchProvider(unittest.TestCase):
         self.assertEqual(self.provider.name, "yandex-visual-search")
 
     def test_can_search_valid_image(self):
-        result = self.provider.can_search("data/input/query.jpg")
+        result = self.provider.can_search(QUERY_IMAGE)
         self.assertTrue(result)
 
     def test_can_search_invalid_path(self):
@@ -415,7 +429,7 @@ class TestYandexVisualSearchProvider(unittest.TestCase):
             os.unlink(tmp.name)
 
     def test_search_by_image_returns_list(self):
-        results = self.provider.search_by_image("data/input/query.jpg")
+        results = self.provider.search_by_image(QUERY_IMAGE)
         self.assertIsInstance(results, list)
 
     def test_search_by_image_invalid_raises(self):
