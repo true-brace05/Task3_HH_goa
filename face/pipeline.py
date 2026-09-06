@@ -28,6 +28,7 @@ def run_face_pipeline(
     high_threshold: float = DEFAULT_HIGH_THRESHOLD,
     low_threshold: float = DEFAULT_LOW_THRESHOLD,
     discovery_manifest: Optional[Dict[str, Any]] = None,
+    output_path: Optional[str] = "data/debug/verification_results.json",
 ) -> Dict[str, Any]:
     """
     Execute the integrated face verification pipeline on a reference image.
@@ -38,6 +39,7 @@ def run_face_pipeline(
     3. Run candidate discovery & acquisition (or use provided discovery_manifest).
     4. Verify each acquired candidate image against reference embedding.
     5. Rank all candidates by similarity and assign decisions (MATCH / NO MATCH / INCONCLUSIVE).
+    6. Automatically save output to data/debug/verification_results.json.
     
     Returns:
         Structured pipeline results dict containing query info, discovery counts,
@@ -134,6 +136,13 @@ def run_face_pipeline(
         "threshold_notice": "DEMO ONLY - NOT CALIBRATED PRODUCTION THRESHOLDS",
         "ranked_candidates": ranked,
     }
+
+    if output_path:
+        out_file = Path(output_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump(result_manifest, f, indent=2)
+        logger.info("[PIPELINE] Verification results saved to: %s", out_file)
 
     return result_manifest
 

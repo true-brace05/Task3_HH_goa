@@ -49,3 +49,8 @@ def generate_embedding(face_or_image: Union[Dict[str, Any], str, Path, np.ndarra
 
     else:
         raise TypeError(f"Unsupported input type for generate_embedding: {type(face_or_image)}")
+
+
+# plan.pdf-compatible alias
+generate_query_embedding = generate_embedding
+

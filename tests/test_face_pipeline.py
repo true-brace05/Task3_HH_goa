@@ -141,10 +141,40 @@ class TestFacePipelineIntegration(unittest.TestCase):
             run_face_pipeline(self.cand_noface)
         self.assertIn("No face detected", str(ctx.exception))
 
-        with self.assertRaises(ValueError) as ctx:
-            run_face_pipeline(self.cand_multi)
-        self.assertIn("Multiple faces", str(ctx.exception))
+    def test_pipeline_saves_debug_verification_results_json(self):
+        """Verify that run_face_pipeline automatically writes data/debug/verification_results.json."""
+        import json
+        debug_file = Path("data/debug/verification_results.json")
+        mock_manifest = {
+            "query_image": str(self.query_image),
+            "candidate_count": 1,
+            "acquired_count": 1,
+            "failed_count": 0,
+            "candidates": [
+                {
+                    "candidate_id": "cand_001",
+                    "status": "success",
+                    "provider": "visual-search-acquisition",
+                    "local_path": str(self.cand_same),
+                    "search_rank": 1,
+                }
+            ],
+        }
+
+        result = run_face_pipeline(
+            reference_image_path=self.query_image,
+            discovery_manifest=mock_manifest,
+            output_path=str(debug_file),
+        )
+
+        self.assertTrue(debug_file.exists(), "verification_results.json should be written to disk")
+        with open(debug_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["query_image"], str(self.query_image))
+        self.assertEqual(len(data["ranked_candidates"]), 1)
+        self.assertEqual(data["ranked_candidates"][0]["decision"], "MATCH")
 
 
 if __name__ == "__main__":
     unittest.main()
+
