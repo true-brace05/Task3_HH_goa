@@ -186,13 +186,13 @@ If Google returns a CAPTCHA or upload form instead of results, the provider retu
 
 ### Provider Comparison
 
-| Provider | Visual Query | Runtime Results | Image URLs | Source URLs | Free/Public | Automation Restrictions | License | Decision |
-| -------- | ------------ | --------------- | ---------- | ----------- | ----------- | ----------------------- | ------- | -------- |
+| Provider | Visual Query | Runtime Results | Image URLs | Source URLs | Free/Public | Automation Restrictions | Service Terms | Decision |
+| -------- | ------------ | --------------- | ---------- | ----------- | ----------- | ----------------------- | ------------- | -------- |
 | MCR | No | Registry metadata | No | No | Yes | None | N/A | Rejected — not visual search |
 | Docker Hub | No | Registry metadata | No | No | Yes (auth required) | Auth required | N/A | Rejected — not visual search |
-| Google Lens | Yes | Yes (CAPTCHA blocked) | Yes | Yes | Yes | CAPTCHA blocks automated access | MIT (community client) | Rejected — blocked |
-| TinEye | Yes | Yes | Yes | Yes | No (paid API) | $200 for 5,000 searches | MIT (pytineye) | Rejected — paid |
-| **Yandex Visual Search** | **Yes** | **Yes** | **Yes** | **Yes** | **Yes** | **None (public endpoint)** | **MIT** | **Selected** |
+| Google Lens | Yes | Yes (CAPTCHA blocked) | Yes | Yes | Yes | CAPTCHA blocks automated access | Public web interface | Rejected — blocked |
+| TinEye | Yes | Yes | Yes | Yes | No (paid API) | $200 for 5,000 searches | Paid API | Rejected — paid |
+| **Yandex Visual Search** | **Yes** | **Yes** | **Yes** | **Yes** | **Yes** | **Rate limiting possible** | **Public web interface** | **Selected** |
 
 ### Provider Selected
 
@@ -204,15 +204,18 @@ If Google returns a CAPTCHA or upload form instead of results, the provider retu
 - No API key required
 - No CAPTCHA observed during testing
 - Returns real visual search results
+- **Service Terms**: Public web interface, not an official API. Subject to rate limiting and availability changes.
 
 ### How It Works
 
-1. Local image is POSTed to `https://yandex.com/images/search` with `rpt=imageview&format=json`
+1. Local image is POSTed to Yandex's public image search endpoint (`https://yandex.com/images/search`) with `rpt=imageview&format=json`
 2. Response contains `cbirId` (content-based image retrieval ID)
 3. Search results page fetched at `https://yandex.com/images/search?cbir_id={cbir_id}&rpt=imageview`
 4. HTML parsed with BeautifulSoup to extract similar image links
 5. Image URLs extracted from `img_url` query parameter in similar links
 6. Deduplicated and returned as candidate list
+
+**Note**: This uses Yandex's public web interface, not an official API. The endpoint is the same one used by browser users performing manual image search.
 
 ### Phase 6 Results
 

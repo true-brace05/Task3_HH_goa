@@ -623,7 +623,7 @@ Reference:
 - Type: Visual reverse image search
 - Interface: `search_by_image(image_path) -> list`
 - Request: POST image to `https://yandex.com/images/search`, parse JSON for `cbir_id`, fetch search results page
-- License: MIT (based on open-source implementations)
+- Service Terms: Public web interface, not an official API. Subject to rate limiting and availability changes.
 - Authentication: None required
 - Rate limits: May block concurrent requests
 
@@ -754,9 +754,10 @@ Safeguards implemented:
 
 - Yandex may block requests if too many are made concurrently
 - Some image hosts may timeout during acquisition (1 of 20 failed)
-- No official Yandex API — uses Yandex's public web interface
+- No official Yandex API — uses Yandex's public web interface (not an official API)
 - BeautifulSoup parsing may need updates if Yandex changes markup
 - Rate limiting may apply for large queries
+- Service terms: Yandex's public web interface is subject to availability changes and rate limiting
 
 ## Files Changed
 
@@ -778,18 +779,95 @@ Push: SUCCESS
 
 ---
 
+## Phase 7 — Discovery Module Finalization
+
+### Date
+
+2026-09-06
+
+### Engineer
+
+Nikhil
+
+### Branch
+
+feature/discovery-finalization
+
+### Objective
+
+Finalize the Discovery Module for handoff to Member 1 (face verification). Clean, reproducible, contract-compatible, documented, tested.
+
+### Previous Phase
+
+Phase 6 — Alternative Visual Search Provider
+
+Reference:
+- Branch: feature/visual-search-provider-2
+- Commit: 8646e27
+- Status: GREEN (20 candidates, 19 acquired)
+
+### Changes Made
+
+1. **`search/acquisition/visual.py`** — Added provenance fields to acquisition results:
+   - `thumbnail_url`, `title`, `search_rank`, `discovery_provider` now preserved
+   - Failed acquisitions also include provenance fields
+   - Content validation simplified (single PIL check)
+
+2. **`README.md`** — Updated for Phase 7:
+   - Fixed licensing/terminology (no "MIT licensed Yandex service")
+   - Updated usage examples to show `YandexVisualSearchProvider`
+   - Updated "How It Works" to describe Yandex flow
+   - Updated "Current Limitations" for Yandex
+   - Added handoff reference
+
+3. **`docs/search_decision.md`** — Updated for Phase 7:
+   - Fixed provider comparison table (service terms, not license)
+   - Added "Service Terms" section for Yandex
+   - Clarified Yandex uses public web interface, not official API
+
+4. **`audit.md`** — Updated for Phase 7:
+   - Fixed "License" to "Service Terms" for Yandex
+   - Updated "Known Limitations" with service terms
+
+5. **`docs/discovery_handoff.md`** — Created for Member 1:
+   - Candidate contract documentation
+   - Usage examples
+   - Provenance chain description
+   - Known limitations
+
+### Verification
+
+- **51 unit tests**, all passing
+- **E2E pipeline**: 20 candidates → 19 acquired → SHA-256 computed
+- **Manifest**: `data/debug/candidate_manifest.json` with correct provenance
+
+### Status
+
+**GREEN** — Discovery Module finalized and ready for handoff to Member 1.
+
+### Known Limitations
+
+- Yandex is a public web interface, not an official API
+- Subject to rate limiting and availability changes
+- Some image hosts timeout during acquisition
+- Title and thumbnail_url are often null
+- No face detection — returns all visually similar images
+
+---
+
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total Commits | 7 (including Phase 6) |
-| Branch | `feature/visual-search-provider-2` |
+| Total Commits | 8 (including Phase 7) |
+| Branch | `feature/discovery-finalization` |
 | Phase 1 Commit | `06afd98` |
 | Phase 2 Commit | `90a6aeac3cae97f54851a9d983ff313e4dbbd15` |
 | Phase 3 Commit | `df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10` |
 | Phase 4 Commit | `7b3058631195cfd88a8384e5de4baac46d6365f1` |
 | Phase 5 Commit | `61263882f572a4adaf429ae26a624152aa6c6e86` |
-| Phase 6 Branch | `feature/visual-search-provider-2` |
+| Phase 6 Commit | `8646e27` |
+| Phase 7 Branch | `feature/discovery-finalization` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
 

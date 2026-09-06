@@ -53,16 +53,8 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
                     }
 
                 content_type = response.headers.get("content-type", "")
-                if "image" not in content_type:
-                    return {
-                        "candidate_id": candidate_id,
-                        "status": "failed",
-                        "error": f"Not an image (content-type: {content_type})",
-                        "provider": self.name,
-                        "content_type": content_type,
-                    }
-
                 content = response.content
+
                 try:
                     img = Image.open(BytesIO(content))
                     img.verify()
@@ -70,8 +62,15 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
                     return {
                         "candidate_id": candidate_id,
                         "status": "failed",
-                        "error": "Downloaded content is not a valid image",
+                        "error": f"Downloaded content is not a valid image (content-type: {content_type})",
                         "provider": self.name,
+                        "content_type": content_type,
+                        "source_url": candidate.get("source_url"),
+                        "image_url": candidate.get("image_url"),
+                        "thumbnail_url": candidate.get("thumbnail_url"),
+                        "title": candidate.get("title"),
+                        "search_rank": candidate.get("search_rank"),
+                        "discovery_provider": candidate.get("provider"),
                     }
 
                 return self._save_image(candidate, content, content_type, content_length)
@@ -85,6 +84,12 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
                     "status": "failed",
                     "error": f"HTTP error: {e}",
                     "provider": self.name,
+                    "source_url": candidate.get("source_url"),
+                    "image_url": candidate.get("image_url"),
+                    "thumbnail_url": candidate.get("thumbnail_url"),
+                    "title": candidate.get("title"),
+                    "search_rank": candidate.get("search_rank"),
+                    "discovery_provider": candidate.get("provider"),
                 }
             except requests.exceptions.RequestException as e:
                 logger.warning("Request failed for %s: %s", image_url, e)
@@ -93,6 +98,12 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
                     "status": "failed",
                     "error": f"Request failed: {e}",
                     "provider": self.name,
+                    "source_url": candidate.get("source_url"),
+                    "image_url": candidate.get("image_url"),
+                    "thumbnail_url": candidate.get("thumbnail_url"),
+                    "title": candidate.get("title"),
+                    "search_rank": candidate.get("search_rank"),
+                    "discovery_provider": candidate.get("provider"),
                 }
 
         return {
@@ -100,6 +111,12 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
             "status": "failed",
             "error": "Max retries exceeded",
             "provider": self.name,
+            "source_url": candidate.get("source_url"),
+            "image_url": candidate.get("image_url"),
+            "thumbnail_url": candidate.get("thumbnail_url"),
+            "title": candidate.get("title"),
+            "search_rank": candidate.get("search_rank"),
+            "discovery_provider": candidate.get("provider"),
         }
 
     def _save_image(self, candidate: dict, content: bytes, content_type: str, size: int) -> dict:
@@ -130,4 +147,8 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
             "content_sha256": content_sha256,
             "source_url": candidate.get("source_url"),
             "image_url": candidate.get("image_url"),
+            "thumbnail_url": candidate.get("thumbnail_url"),
+            "title": candidate.get("title"),
+            "search_rank": candidate.get("search_rank"),
+            "discovery_provider": candidate.get("provider"),
         }
