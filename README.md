@@ -146,3 +146,64 @@ python -m search.pipeline
 - Safe deterministic filenames only
 - No shell commands constructed from URLs
 - No credentials logged
+
+## Candidate Image Acquisition
+
+### Why Phase 3 Retrieval Failed
+
+Phase 3 attempted to download candidate images from MCR catalog URLs. All 20 candidates failed because MCR catalog URLs return HTML repository pages, not direct image blobs. The MCR registry API returns container image layers (`application/octet-stream`, 543MB+), which are not visual candidate images.
+
+### Difference Between Discovery and Acquisition
+
+- **Discovery**: Finding candidate metadata (repository names, tags) via registry catalog APIs
+- **Acquisition**: Obtaining actual visual image bytes (photographs) from discovered candidates
+
+These are distinct operations requiring different mechanisms.
+
+### Acquisition Providers Tested
+
+1. **MCR Registry API** (`https://mcr.microsoft.com/v2/{repo}/blobs/{digest}`)
+   - Manifest access: ✅ Works (returns container image manifests)
+   - Blob access: ✅ Works (returns `application/octet-stream`)
+   - Visual image: ❌ Blobs are container image layers, not photographs
+   - Blob sizes: 32 bytes to 543MB — all container artifacts
+
+2. **Docker Hub Registry API** (`https://registry-1.docker.io/v2/{repo}/manifests/latest`)
+   - Access: ❌ Requires authentication (HTTP 401)
+   - Even with auth, would return container image layers
+
+### Acquisition Architecture
+
+The acquisition layer is implemented as a separate abstraction:
+- `search/acquisition/base.py` — `ImageAcquisitionProvider` abstract base, `AcquisitionManager`
+- `search/acquisition/mcr.py` — `MCRAcquisitionProvider` — uses MCR registry v2 API to attempt blob download
+- `search/acquisition/dockerhub.py` — `DockerHubAcquisitionProvider` — attempts Docker Hub registry access
+- `search/acquisition/runner.py` — Pipeline runner for acquisition
+
+The architecture separates:
+1. **Discovery Provider** → candidate metadata
+2. **Acquisition Provider** → candidate image bytes
+
+### Output Files
+
+- `data/debug/candidate_manifest.json` — Updated with acquisition results
+- Each candidate includes `acquisition_status`, `error`, `provider`, `file_size`, `content_type`
+
+### Known Limitations
+
+- MCR only exposes container image artifacts, not visual candidate photographs
+- Docker Hub requires authentication and also returns container artifacts
+- No legitimate acquisition path currently produces visual candidate images
+- The POC status is FAIL: no mechanism produces actual candidate photographs
+- Acquisition does not establish identity — no candidate image represents a person
+
+### Security Safeguards
+
+- Request timeout (15s)
+- Response size limit (50MB)
+- Content-type validation
+- Image content validation via PIL
+- Safe deterministic filenames
+- No shell commands from URLs
+- No credentials logged
+- No arbitrary redirect following

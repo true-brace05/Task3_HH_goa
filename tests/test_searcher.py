@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+import requests.exceptions
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -14,6 +15,9 @@ from search.providers.primary import MicrosoftFoundryProvider
 from search.providers.backup import DockerHubProvider
 from search.normalizer import normalize_results
 from search.retriever import retrieve_candidates
+from search.acquisition.base import AcquisitionManager
+from search.acquisition.mcr import MCRAcquisitionProvider
+from search.acquisition.dockerhub import DockerHubAcquisitionProvider
 
 
 class TestValidateImage(unittest.TestCase):
@@ -182,8 +186,6 @@ class TestNormalizer(unittest.TestCase):
         self.assertEqual(normalized[1]["candidate_id"], "cand_002")
 
 
-import requests.exceptions
-
 class TestRetriever(unittest.TestCase):
     def test_successful_retrieval(self):
         candidate = {
@@ -248,6 +250,98 @@ class TestRetriever(unittest.TestCase):
                 self.assertEqual(result["candidate_count"], 2)
                 self.assertEqual(result["retrieved_count"] + result["failed_count"], 2)
 
+
+class TestAcquisitionBase(unittest.TestCase):
+    def test_acquisition_manager_creation(self):
+        mcr = MCRAcquisitionProvider()
+        docker = DockerHubAcquisitionProvider()
+        manager = AcquisitionManager(primary_provider=mcr, backup_provider=docker)
+        self.assertIsNotNone(manager)
+
+    def test_acquisition_manager_no_backup(self):
+        mcr = MCRAcquisitionProvider()
+        manager = AcquisitionManager(primary_provider=mcr)
+        self.assertIsNotNone(manager)
+        self.assertIsNone(manager.backup)
+
+    def test_mcr_can_acquire(self):
+        mcr = MCRAcquisitionProvider()
+        candidate = {
+            "candidate_id": "cand_001",
+            "image_url": "https://mcr.microsoft.com/samples/test",
+            "provider": "microsoft-foundry",
+        }
+        self.assertTrue(mcr.can_acquire(candidate))
+
+    def test_mcr_cannot_acquire_non_mcr(self):
+        mcr = MCRAcquisitionProvider()
+        candidate = {
+            "candidate_id": "cand_001",
+            "image_url": "https://example.com/img.jpg",
+            "provider": "dockerhub",
+        }
+        self.assertFalse(mcr.can_acquire(candidate))
+
+    def test_dockerhub_can_acquire(self):
+        docker = DockerHubAcquisitionProvider()
+        candidate = {
+            "candidate_id": "cand_001",
+            "image_url": "docker.io/test/repo",
+            "provider": "dockerhub",
+        }
+        self.assertTrue(docker.can_acquire(candidate))
+
+    def test_dockerhub_cannot_acquire_missing_url(self):
+        docker = DockerHubAcquisitionProvider()
+        candidate = {"candidate_id": "cand_001", "search_rank": 1}
+        self.assertFalse(docker.can_acquire(candidate))
+
+    def test_acquire_missing_url(self):
+        mcr = MCRAcquisitionProvider()
+        candidate = {"candidate_id": "cand_001", "search_rank": 1}
+        result = mcr.acquire(candidate)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("error", result)
+
+    def test_acquire_malformed_candidate(self):
+        mcr = MCRAcquisitionProvider()
+        candidate = {}
+        result = mcr.acquire(candidate)
+        self.assertIn(result["status"], ["failed"])
+
+    def test_fallback_primary_failure(self):
+        mcr = MCRAcquisitionProvider()
+        docker = DockerHubAcquisitionProvider()
+        manager = AcquisitionManager(primary_provider=mcr, backup_provider=docker)
+        # Both providers will fail for real network calls, but manager should handle it
+        candidate = {"candidate_id": "cand_001", "image_url": "https://invalid.invalid/test", "provider": "microsoft-foundry"}
+        result = manager.acquire(candidate)
+        self.assertIn(result["status"], ["failed"])
+
+    def test_primary_success_backup_not_called(self):
+        mcr = MCRAcquisitionProvider()
+        docker = DockerHubAcquisitionProvider()
+        manager = AcquisitionManager(primary_provider=mcr, backup_provider=docker)
+        # Mock the MCR provider to succeed
+        with patch.object(mcr, 'acquire') as mock_acquire:
+            mock_acquire.return_value = {"candidate_id": "cand_001", "status": "success", "provider": "mcr-acquisition"}
+            with patch.object(docker, 'acquire') as mock_docker_acquire:
+                candidate = {"candidate_id": "cand_001", "image_url": "https://mcr.microsoft.com/test", "provider": "microsoft-foundry"}
+                result = manager.acquire(candidate)
+                self.assertEqual(result["status"], "success")
+                mock_docker_acquire.assert_not_called()
+
+    def test_provenance_preserved(self):
+        mcr = MCRAcquisitionProvider()
+        candidate = {
+            "candidate_id": "cand_001",
+            "provider": "microsoft-foundry",
+            "search_rank": 1,
+            "source_url": "https://mcr.microsoft.com/samples/test",
+            "image_url": "https://mcr.microsoft.com/samples/test",
+        }
+        result = mcr.acquire(candidate)
+        self.assertEqual(result["candidate_id"], "cand_001")
 
 
 if __name__ == "__main__":

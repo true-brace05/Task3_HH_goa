@@ -271,15 +271,158 @@ Push: SUCCESS
 
 ---
 
+## Phase 4 — Candidate Image Acquisition POC
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/candidate-acquisition
+
+## Objective
+
+Determine whether real candidate image assets can be acquired from the Phase 2/3 discovery results.
+
+## Previous Phase
+
+Phase 3 — Normalization + Candidate Retrieval
+
+Reference:
+- Branch: feature/normalization-retrieval
+- Commit: df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10
+- Search candidates: 20
+- Normalized: 20
+- Retrieved: 0
+
+## Discovery Provider
+
+Microsoft Foundry / MCR
+
+## Acquisition Providers Tested
+
+1. MCR Registry v2 API — `https://mcr.microsoft.com/v2/{repo}/blobs/{digest}`
+2. Docker Hub Registry API — `https://registry-1.docker.io/v2/{repo}/manifests/latest`
+
+## MCR Findings
+
+- **Catalog API**: ✅ Works — returns real repository names (20+ repos)
+- **Manifest API**: ✅ Works — returns container image manifests with layer digests
+- **Blob API**: ✅ Works — returns `application/octet-stream` blobs
+- **Visual Image**: ❌ All blobs are container image layers, not photographs
+- **Blob sizes**: 32 bytes to 543MB — all container artifacts
+- **Web pages**: No `<img>` tags found on MCR repository pages
+
+## Docker Hub Findings
+
+- **Registry API**: ❌ Requires authentication (HTTP 401)
+- **Web API**: Returns repository tags, not direct image URLs
+- **Visual Image**: ❌ Would also return container artifacts, not photographs
+
+## Acquisition Architecture
+
+Created `search/acquisition/` with clean separation between discovery and acquisition:
+1. `search/acquisition/base.py` — `ImageAcquisitionProvider` abstract class, `AcquisitionManager`
+2. `search/acquisition/mcr.py` — `MCRAcquisitionProvider` — Uses MCR registry v2 API to attempt blob download and image validation
+3. `search/acquisition/dockerhub.py` — `DockerHubAcquisitionProvider` — Attempts Docker Hub registry access
+4. `search/acquisition/runner.py` — Pipeline runner
+
+The `AcquisitionManager` implements fallback logic: primary (MCR) → backup (Docker Hub).
+
+## Results
+
+Candidates discovered: 20
+Normalized: 20
+Acquisition attempted: 20
+Successfully acquired: 0
+Failed: 20
+
+## Failure Details
+
+All 20 candidates failed acquisition:
+- MCR blobs returned `application/octet-stream` — container image layers, not visual images
+- Blob sizes ranged from 32 bytes to 543MB — all container artifacts
+- PIL image verification failed on all blob content
+- Docker Hub registry required authentication
+
+## Provenance
+
+Discovery → Acquisition traceability preserved:
+- `candidate_id` preserved from normalization
+- `discovery_provider` recorded in manifest
+- `acquisition_provider` recorded for each attempt
+- `source_url` and `image_url` preserved
+- `local_path` set only on success (none succeeded)
+
+## Tests
+
+37 tests, all passing:
+- 6 validation tests
+- 3 MCR provider tests
+- 3 DockerHub provider tests
+- 4 searcher tests
+- 7 normalizer tests
+- 5 retriever tests
+- 9 acquisition base tests (abstraction, can_acquire, fallback, provenance, mocks)
+
+## Real End-to-End Test
+
+Ran complete pipeline: query.jpg → MCR discovery → 20 real candidates → normalization → acquisition → 0/20 success
+
+Manifest saved to `data/debug/candidate_manifest.json`. All candidates recorded with acquisition failure reasons.
+
+## Security
+
+Safeguards implemented:
+- Request timeout (15s)
+- Response size limit (50MB)
+- Content-type validation
+- Image content validation via PIL
+- Safe deterministic filenames
+- No shell commands from URLs
+- No credentials logged
+- No arbitrary redirect following
+
+## Status
+
+FAIL
+
+No legitimate acquisition mechanism produces visual candidate images. MCR and Docker Hub both serve container artifacts (`application/octet-stream`), not photographs.
+
+## Known Limitations
+
+- MCR registry API returns container image layers, not visual candidate images
+- Docker Hub registry requires authentication
+- No public endpoint produces visual candidate images
+- The acquisition abstraction is correctly implemented but cannot overcome provider limitations
+- Face verification cannot proceed without a source of visual candidate images
+
+## Next Step
+
+PHASE 4 NOT READY FOR FACE VERIFICATION. Resolve image acquisition before face verification.
+
+## Git
+
+Commit: `7b3058631195cfd88a8384e5de4baac46d6365f1`
+Push: SUCCESS
+
+---
+
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total Commits | 3 |
-| Branch | `feature/normalization-retrieval` |
+| Total Commits | 4 |
+| Branch | `feature/candidate-acquisition` |
 | Phase 1 Commit | `06afd98` |
 | Phase 2 Commit | `90a6aeac3cae97f54851a9d983ff313e4dbbd15` |
 | Phase 3 Commit | `df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10` |
+| Phase 4 Commit | `7b3058631195cfd88a8384e5de4baac46d6365f1` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
 
