@@ -272,5 +272,5 @@ Confirmed from code/tests and existing `/tmp` artifacts (not mocked):
 
 MIT — see [LICENSE](LICENSE).
 
-Copyright (c) 2026 Astha Bansal.
+
 
