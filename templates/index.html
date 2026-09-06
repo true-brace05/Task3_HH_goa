@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visual Evidence Verification — Forensic Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: { sans: ['Inter','system-ui','sans-serif'], mono: ['JetBrains Mono','monospace'] }, colors: { charcoal:'#0f1114', surface:'#1a1d23', surface2:'#23262e', borderc:'#2a2e38', cyan:'#06b6d4', violet:'#8b5cf6', success:'#10b981', amber:'#f59e0b', danger:'#ef4444' } } } }
+</script>
+<style>
+body{background:#0f1114;color:#e5e7eb}
+.mono{font-family:'JetBrains Mono',monospace}
+.hash{font-family:'JetBrains Mono',monospace;word-break:break-all;letter-spacing:-0.02em}
+.card{background:#1a1d23;border:1px solid #2a2e38}
+.card-hover:hover{border-color:#3a3f4d}
+.step-active{border-color:#06b6d4;background:rgba(6,182,214,0.08)}
+.step-done{border-color:#10b981;background:rgba(16,185,129,0.08)}
+.step-error{border-color:#ef4444;background:rgba(239,68,68,0.10)}
+.step-pending{opacity:0.45}
+.progress{height:2px;background:#2a2e38}
+.progress-bar{height:2px;transition:width 0.6s ease}
+.spinner{border:2px solid #2a2e38; border-top-color:#06b6d4; border-radius:50%; width:16px; height:16px; animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:#2a2e38;border-radius:3px}
+</style>
+</head>
+<body class="font-sans antialiased">
+<div class="min-h-screen flex">
+  <!-- Sidebar desktop -->
+  <aside class="w-[260px] shrink-0 border-r border-borderc bg-[#0f1114] hidden md:flex flex-col sticky top-0 h-screen">
+    <div class="px-6 py-6 border-b border-borderc">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded bg-cyan flex items-center justify-center font-mono text-xs font-bold text-black">VE</div>
+        <div>
+          <div class="text-[13px] font-semibold tracking-widest text-white">VISUAL EVIDENCE</div>
+          <div class="text-[10px] tracking-[0.18em] text-zinc-500 -mt-1">FORENSIC INTELLIGENCE</div>
+        </div>
+      </div>
+      <div class="mt-4 text-[11px] leading-relaxed text-zinc-500">Discover · Verify · Hash · Anchor · Verify</div>
+    </div>
+    <nav class="px-3 py-4 space-y-1 flex-1">
+      <button data-nav="investigate" class="nav-btn w-full text-left px-3 py-2.5 rounded text-sm bg-surface border border-borderc text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-cyan"></span> Investigate</button>
+      <button data-nav="evidence" class="nav-btn w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-zinc-600"></span> Evidence</button>
+      <button data-nav="verification" class="nav-btn w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-success"></span> Verification</button>
+      <button data-nav="blockchain" class="nav-btn w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-violet"></span> Blockchain</button>
+      <button data-nav="status" class="nav-btn w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber"></span> System Status</button>
+    </nav>
+    <div class="px-4 py-4 border-t border-borderc space-y-2">
+      <div id="status-mini" class="text-[11px] mono text-zinc-500">checking…</div>
+      <div class="text-[10px] text-zinc-600">Evidence remains off-chain.<br>Only root hash is anchored.</div>
+    </div>
+  </aside>
+
+  <!-- Mobile drawer overlay -->
+  <div id="mobile-overlay" class="fixed inset-0 bg-black/60 z-30 hidden md:hidden" onclick="closeMobileMenu()"></div>
+  <div id="mobile-drawer" class="fixed inset-y-0 left-0 w-[260px] bg-[#0f1114] border-r border-borderc z-40 transform -translate-x-full transition-transform md:hidden flex flex-col">
+    <div class="px-6 py-6 border-b border-borderc flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded bg-cyan flex items-center justify-center font-mono text-xs font-bold text-black">VE</div>
+        <div><div class="text-[13px] font-semibold tracking-widest text-white">VISUAL EVIDENCE</div><div class="text-[10px] tracking-[0.18em] text-zinc-500 -mt-1">FORENSIC INTELLIGENCE</div></div>
+      </div>
+      <button onclick="closeMobileMenu()" class="mono text-zinc-400 p-1">✕</button>
+    </div>
+    <nav class="px-3 py-4 space-y-1 flex-1">
+      <button data-nav="investigate" class="nav-btn-mobile w-full text-left px-3 py-2.5 rounded text-sm bg-surface border border-borderc text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-cyan"></span> Investigate</button>
+      <button data-nav="evidence" class="nav-btn-mobile w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-zinc-600"></span> Evidence</button>
+      <button data-nav="verification" class="nav-btn-mobile w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-success"></span> Verification</button>
+      <button data-nav="blockchain" class="nav-btn-mobile w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-violet"></span> Blockchain</button>
+      <button data-nav="status" class="nav-btn-mobile w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber"></span> System Status</button>
+    </nav>
+    <div class="px-4 py-4 border-t border-borderc"><div id="status-mini-drawer" class="text-[11px] mono text-zinc-500">checking…</div></div>
+  </div>
+
+  <!-- Main -->
+  <main class="flex-1 min-w-0">
+    <!-- Top bar mobile -->
+    <div class="md:hidden flex items-center gap-2 px-4 py-3 border-b border-borderc bg-surface sticky top-0 z-20">
+      <button id="mobile-menu-btn" class="p-1.5 rounded border border-borderc bg-[#0f1114] mono text-xs" onclick="openMobileMenu()">☰</button>
+      <div class="w-7 h-7 rounded bg-cyan flex items-center justify-center mono text-xs font-bold text-black">VE</div>
+      <span class="text-sm font-semibold">Visual Evidence</span>
+      <span class="ml-auto text-[11px] text-zinc-500" id="status-mini-m">—</span>
+    </div>
+
+    <!-- Investigate -->
+    <section id="view-investigate" class="view">
+      <div class="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
+        <div class="mb-8">
+          <h1 class="text-[28px] md:text-[32px] font-semibold tracking-tight text-white leading-tight">Visual Evidence Verification</h1>
+          <p class="text-[14px] text-zinc-400 mt-2 max-w-[640px]">Discover, verify, hash, and cryptographically anchor visual evidence. Image → AI verification → cryptographic evidence → blockchain trust.</p>
+        </div>
+
+        <!-- Upload -->
+        <div id="upload-card" class="card rounded-xl p-6 md:p-7">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-sm font-semibold tracking-widest text-white">01 — QUERY IMAGE</h2>
+            <label class="flex items-center gap-2 text-xs text-zinc-400"><input id="anchor-check" type="checkbox" class="accent-cyan"> Anchor on blockchain (if configured)</label>
+          </div>
+          <label id="drop" class="group block border border-dashed border-borderc rounded-xl bg-[#0f1114] hover:border-zinc-600 transition p-8 md:p-10 text-center cursor-pointer">
+            <input id="file" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" class="hidden">
+            <div class="mx-auto w-12 h-12 rounded-full bg-surface flex items-center justify-center border border-borderc group-hover:border-cyan/40 transition">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="1.5"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/></svg>
+            </div>
+            <div class="mt-3 text-sm font-medium text-white">Drop query image or click to browse</div>
+            <div class="text-xs text-zinc-500 mt-1">JPG, PNG, WEBP — single face recommended for strongest verification</div>
+            <div class="text-[11px] mono text-zinc-600 mt-3">Yandex discovery may return 0 candidates — pipeline remains valid.</div>
+          </label>
+          <div id="upload-meta" class="hidden mt-4 flex items-center gap-3 text-xs mono text-zinc-400"></div>
+          <div id="pipeline-error" class="hidden mt-4 mono text-xs border border-danger/40 bg-danger/10 text-danger rounded p-3"></div>
+        </div>
+
+        <!-- Pipeline -->
+        <div id="pipeline" class="hidden mt-6 card rounded-xl p-6">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs tracking-[0.18em] text-zinc-400">EVIDENCE PIPELINE</h3>
+            <span id="pipeline-status" class="text-xs mono px-2 py-1 rounded bg-surface border border-borderc text-zinc-300 flex items-center gap-2">running…</span>
+          </div>
+          <div class="mt-4 grid grid-cols-5 gap-2 text-[11px]">
+            <div id="s-discovery" class="step-pending card rounded-lg p-3 text-center"><div class="mono text-cyan">01</div><div class="font-medium text-white mt-1">DISCOVERY</div><div class="text-zinc-500 text-[10px] mt-1" id="s-discovery-detail">—</div></div>
+            <div id="s-verification" class="step-pending card rounded-lg p-3 text-center"><div class="mono text-violet">02</div><div class="font-medium text-white mt-1">FACE VERIFICATION</div><div class="text-zinc-500 text-[10px] mt-1">insightface buffalo_l</div></div>
+            <div id="s-hashing" class="step-pending card rounded-lg p-3 text-center"><div class="mono text-zinc-400">03</div><div class="font-medium text-white mt-1">EVIDENCE HASHING</div><div class="text-zinc-500 text-[10px] mt-1">SHA-256 canonical</div></div>
+            <div id="s-anchor" class="step-pending card rounded-lg p-3 text-center"><div class="mono text-zinc-400">04</div><div class="font-medium text-white mt-1">BLOCKCHAIN ANCHOR</div><div class="text-zinc-500 text-[10px] mt-1">optional</div></div>
+            <div id="s-verify" class="step-pending card rounded-lg p-3 text-center"><div class="mono text-success">05</div><div class="font-medium text-white mt-1">INDEPENDENT VERIFY</div><div class="text-zinc-500 text-[10px] mt-1">tamper detection</div></div>
+          </div>
+          <div class="mt-4 progress rounded"><div id="progress-bar" class="progress-bar bg-cyan" style="width:0%"></div></div>
+        </div>
+
+        <!-- Query + Candidates -->
+        <div id="results" class="hidden mt-6 space-y-6">
+          <div class="grid md:grid-cols-[280px_1fr] gap-6">
+            <div class="card rounded-xl p-4">
+              <div class="text-xs tracking-widest text-zinc-400 mb-3">QUERY</div>
+              <img id="query-img" class="w-full rounded-lg border border-borderc object-cover bg-black" style="aspect-ratio:1">
+              <div id="query-caption" class="mono text-[11px] text-zinc-500 mt-2"></div>
+            </div>
+            <div class="card rounded-xl p-5">
+              <div class="flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-white">Discovered Candidates</h3>
+                <span id="cand-count" class="mono text-xs px-2 py-1 rounded bg-surface border border-borderc text-zinc-300">—</span>
+              </div>
+              <div id="candidate-grid" class="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+              <div id="no-candidates" class="hidden mt-4 text-sm text-amber border border-amber/30 bg-amber/10 rounded p-3">No candidates discovered. Evidence will still be sealed with verification metadata (demo remains valid).</div>
+            </div>
+          </div>
+
+          <!-- Face verification -->
+          <div class="card rounded-xl p-6">
+            <h3 class="text-sm font-semibold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-violet"></span> Face Verification — insightface buffalo_l <span class="mono text-[10px] px-1.5 py-0.5 rounded bg-violet/20 text-violet">0.70 / 0.40 thresholds</span></h3>
+            <div id="verify-grid" class="mt-4 grid md:grid-cols-2 gap-4"></div>
+          </div>
+
+          <!-- Evidence integrity -->
+          <div class="card rounded-xl p-6 border-success/30">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+              <h3 class="text-sm font-semibold tracking-widest text-white">EVIDENCE INTEGRITY</h3>
+              <span class="ml-auto mono text-[11px] px-2 py-1 rounded bg-success/15 text-success border border-success/30">● CRYPTOGRAPHICALLY SEALED</span>
+            </div>
+            <div class="mt-4 grid md:grid-cols-[1fr_300px] gap-6">
+              <div>
+                <div class="text-[11px] tracking-widest text-zinc-500">ROOT EVIDENCE HASH (SHA-256)</div>
+                <div id="root-hash" class="hash text-[13px] md:text-[15px] font-medium text-white mt-2 leading-relaxed"></div>
+                <div class="mt-2 flex gap-2"><button onclick="copyText(document.getElementById('root-hash').innerText)" class="mono text-xs px-2 py-1.5 rounded bg-surface border border-borderc hover:bg-surface2">Copy</button><button id="btn-view-evidence" class="mono text-xs px-2 py-1.5 rounded bg-cyan text-black">View Evidence JSON</button></div>
+                <div class="mt-4 grid grid-cols-3 gap-3 text-xs">
+                  <div class="card rounded p-3"><div class="text-zinc-500">Candidates</div><div id="ev-cands" class="mono text-white text-sm mt-1">—</div></div>
+                  <div class="card rounded p-3"><div class="text-zinc-500">Candidate hashes</div><div id="ev-hashes" class="mono text-success text-sm mt-1">—</div></div>
+                  <div class="card rounded p-3"><div class="text-zinc-500">Canonical</div><div class="mono text-cyan text-sm mt-1">SHA-256</div></div>
+                </div>
+              </div>
+              <div class="card rounded-lg p-4 bg-[#0f1114]">
+                <div class="text-xs font-medium text-white">Chain of Custody</div>
+                <div class="mono text-[11px] text-zinc-500 mt-2 space-y-1">
+                  <div>query → discovery → acquisition</div>
+                  <div>→ face verification</div>
+                  <div>→ candidate hashes (SHA-256)</div>
+                  <div>→ root hash → <span class="text-white">anchor optional</span></div>
+                </div>
+                <div class="text-[10px] text-zinc-600 mt-3">Evidence data stays off-chain. Only the 64-hex root hash is anchored.</div>
+              </div>
+            </div>
+            <details class="mt-4"><summary class="mono text-xs text-zinc-400 cursor-pointer">Show candidate hashes & verification</summary><pre id="evidence-details" class="mono text-[11px] bg-[#0f1114] border border-borderc rounded p-3 mt-2 overflow-auto max-h-[320px]"></pre></details>
+          </div>
+
+          <!-- Blockchain -->
+          <div id="anchor-card" class="card rounded-xl p-6">
+            <h3 class="text-sm font-semibold text-white">Blockchain Anchor</h3>
+            <div id="anchor-status" class="mt-3 mono text-xs px-2 py-1 rounded inline-block border">—</div>
+            <div id="anchor-details" class="mt-4 grid md:grid-cols-2 gap-4 mono text-xs hidden">
+              <div class="space-y-2"><div class="text-zinc-500">Contract</div><div id="anchor-contract" class="hash text-white"></div><button onclick="copyText(document.getElementById('anchor-contract').innerText)" class="text-[11px] px-2 py-1 rounded bg-surface border border-borderc">Copy</button></div>
+              <div class="space-y-2"><div class="text-zinc-500">Transaction</div><div id="anchor-tx" class="hash text-white"></div><button onclick="copyText(document.getElementById('anchor-tx').innerText)" class="text-[11px] px-2 py-1 rounded bg-surface border border-borderc">Copy</button></div>
+              <div><div class="text-zinc-500">Block</div><div id="anchor-block" class="text-white"></div></div>
+              <div><div class="text-zinc-500">Evidence Hash ≠ Transaction Hash</div><div class="text-zinc-600">Evidence hash is SHA-256 of evidence. Tx hash is chain receipt.</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Evidence -->
+    <section id="view-evidence" class="view hidden">
+      <div class="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
+        <h2 class="text-xl font-semibold text-white">Evidence</h2>
+        <p class="text-sm text-zinc-400">Recent evidence files from <span class="mono">data/evidence/</span> and validation runs.</p>
+        <div id="evidence-list" class="mt-6 grid gap-3"></div>
+        <div class="card rounded-xl p-5 mt-6">
+          <h3 class="text-sm font-medium text-white">Open Evidence</h3>
+          <div class="flex gap-2 mt-3"><input id="evidence-path" placeholder="data/evidence/evidence_*.json" class="flex-1 mono text-sm bg-[#0f1114] border border-borderc rounded px-3 py-2"><button id="btn-open-evidence" class="mono text-sm px-4 py-2 rounded bg-cyan text-black">Inspect</button></div>
+          <pre id="evidence-preview" class="mono text-xs bg-[#0f1114] border border-borderc rounded p-3 mt-3 overflow-auto max-h-[420px] hidden"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Verification -->
+    <section id="view-verification" class="view hidden">
+      <div class="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
+        <h2 class="text-xl font-semibold text-white">Independent Verification</h2>
+        <p class="text-sm text-zinc-400">Recomputes candidate hashes + root hash. Never trusts stored hash. Optionally checks on-chain anchor.</p>
+        <div class="card rounded-xl p-6 mt-6">
+          <label class="block border border-dashed border-borderc rounded-xl p-6 text-center cursor-pointer bg-[#0f1114]">
+            <input id="verify-file" type="file" accept=".json" class="hidden">
+            <div class="text-sm font-medium text-white">Drop evidence JSON or browse</div>
+            <div class="mono text-xs text-zinc-500 mt-1">Or paste path below</div>
+          </label>
+          <div class="flex gap-2 mt-4"><input id="verify-path" placeholder="data/evidence/evidence_*.json or /tmp/real_evidence_test/evidence_*.json" class="flex-1 mono text-sm bg-[#0f1114] border border-borderc rounded px-3 py-2"><label class="flex items-center gap-2 mono text-xs text-zinc-400"><input id="verify-chain" type="checkbox"> check on-chain</label><button id="btn-verify" class="mono text-sm px-4 py-2 rounded bg-success text-black">Verify</button></div>
+        </div>
+
+        <div id="verify-result" class="hidden mt-6 space-y-4">
+          <div id="verify-badge" class="rounded-xl p-5 border text-center"></div>
+          <div class="card rounded-xl p-5">
+            <h3 class="mono text-xs tracking-widest text-zinc-400">CHECK SEQUENCE</h3>
+            <div id="verify-steps" class="mt-3 space-y-2 mono text-xs"></div>
+          </div>
+          <div class="card rounded-xl p-5">
+            <h3 class="text-sm font-medium text-white">Mismatches (exact)</h3>
+            <pre id="verify-mismatches" class="mono text-xs bg-[#0f1114] border border-borderc rounded p-3 mt-2 overflow-auto"></pre>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button data-tamper="score" class="tamper-btn mono text-xs px-3 py-2 rounded bg-surface border border-borderc">Demo tamper: score</button>
+            <button data-tamper="decision" class="tamper-btn mono text-xs px-3 py-2 rounded bg-surface border border-borderc">Demo tamper: decision</button>
+            <button data-tamper="order" class="tamper-btn mono text-xs px-3 py-2 rounded bg-surface border border-borderc">Demo tamper: order</button>
+            <button data-tamper="timeline" class="tamper-btn mono text-xs px-3 py-2 rounded bg-surface border border-borderc">Demo tamper: timeline</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Blockchain -->
+    <section id="view-blockchain" class="view hidden">
+      <div class="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
+        <h2 class="text-xl font-semibold text-white">Blockchain</h2>
+        <p class="text-sm text-zinc-400">Only the root evidence hash is anchored. Evidence stays off-chain. Receipt status is enforced (reverted txs rejected).</p>
+        <div id="blockchain-panel" class="card rounded-xl p-6 mt-6 mono text-xs space-y-2">loading…</div>
+        <div class="card rounded-xl p-6 mt-6">
+          <h3 class="text-sm font-medium text-white mono">How anchoring works</h3>
+          <ol class="list-decimal ml-5 mono text-xs text-zinc-400 mt-2 space-y-1">
+            <li>Evidence built → root SHA-256 computed</li>
+            <li>`register(bytes32 evidenceHash, string manifestUri)` on EvidenceRegistry (shanghai, chainId 1337)</li>
+            <li>Transaction receipt `status==1` required — otherwise exception</li>
+            <li>Duplicate hash → contract `require(timestamp==0)` reverts → client raises</li>
+            <li>Verify via `verify(bytes32)` view call</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- Status -->
+    <section id="view-status" class="view hidden">
+      <div class="max-w-[1100px] mx-auto px-6 md:px-8 py-8">
+        <h2 class="text-xl font-semibold text-white">System Status</h2>
+        <div id="status-panel" class="mt-6 grid md:grid-cols-2 gap-4"></div>
+        <div class="mono text-[11px] text-zinc-600 mt-6">Hashes, tx hashes, block numbers use monospace. Color is semantic, not decoration.</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+let lastEvidencePath = null;
+let lastAnchor = null;
+let isInvestigating = false;
+let lastVerifyResult = null;
+try { const s = sessionStorage.getItem('vev_last_verify'); if(s) lastVerifyResult = JSON.parse(s); } catch(e){}
+
+// Keep Evidence Pipeline Step 05 in sync with real verification result
+function syncPipelineVerifyState(result){
+  const el = document.getElementById('s-verify');
+  if(!el || !result || typeof result.valid === 'undefined') return;
+  // Do not touch Step 04 (anchor) — only Step 05
+  if(result.valid === true){
+    el.className='card rounded-lg p-3 text-center step-done';
+    let subtitle = 'VALID';
+    if(result.on_chain === true) subtitle = 'VALID · ON-CHAIN';
+    else if(result.valid && result.on_chain === false) subtitle = 'VALID';
+    else if(result.valid) subtitle = 'VALID · integrity confirmed';
+    el.querySelector('div:last-child').textContent = subtitle;
+  } else if(result.valid === false){
+    el.className='card rounded-lg p-3 text-center step-error';
+    el.querySelector('div:last-child').textContent = 'TAMPER DETECTED';
+  }
+  try { sessionStorage.setItem('vev_last_verify', JSON.stringify(result)); lastVerifyResult = result; } catch(e){}
+  // Update progress bar to reflect verified state without claiming anchor
+  const anchorEl = document.getElementById('s-anchor');
+  const hasAnchor = anchorEl && anchorEl.classList.contains('step-done');
+  const progress = document.getElementById('progress-bar');
+  if(progress && result.valid){
+    progress.style.width = hasAnchor ? '100%' : '85%';
+  }
+}
+function restorePipelineVerifyState(){
+  if(lastVerifyResult && document.getElementById('pipeline') && !document.getElementById('pipeline').classList.contains('hidden')){
+    // Only restore if current displayed evidence matches verified hash when possible
+    const rootHashEl = document.getElementById('root-hash');
+    const currentHash = rootHashEl ? rootHashEl.innerText.replace(/\s+/g,'') : null;
+    if(!currentHash || !lastVerifyResult.stored_hash || currentHash === lastVerifyResult.stored_hash || currentHash.includes(lastVerifyResult.stored_hash.slice(0,8))){
+      syncPipelineVerifyState(lastVerifyResult);
+    }
+  }
+}
+
+function copyText(t){ navigator.clipboard.writeText(t); }
+function openMobileMenu(){ $('#mobile-drawer').classList.remove('-translate-x-full'); $('#mobile-overlay').classList.remove('hidden'); }
+function closeMobileMenu(){ $('#mobile-drawer').classList.add('-translate-x-full'); $('#mobile-overlay').classList.add('hidden'); }
+
+$$('.nav-btn').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    $$('.nav-btn').forEach(x=>{x.className='nav-btn w-full text-left px-3 py-2.5 rounded text-sm text-zinc-400 hover:text-white flex items-center gap-2'; x.innerHTML=x.innerHTML.replace('bg-cyan','bg-zinc-600').replace('bg-success','bg-zinc-600').replace('bg-violet','bg-zinc-600').replace('bg-amber','bg-zinc-600')});
+    b.className='nav-btn w-full text-left px-3 py-2.5 rounded text-sm bg-surface border border-borderc text-white flex items-center gap-2';
+    const id=b.dataset.nav;
+    $$('.view').forEach(v=>v.classList.add('hidden'));
+    $('#view-'+id).classList.remove('hidden');
+    if(id==='evidence') loadEvidenceList();
+    if(id==='blockchain') loadBlockchain();
+    if(id==='status') loadStatusPage();
+    if(id==='investigate') setTimeout(restorePipelineVerifyState, 0);
+  });
+});
+$$('.nav-btn-mobile').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    closeMobileMenu();
+    // trigger desktop nav equivalent
+    const id=b.dataset.nav;
+    const desktop = document.querySelector(`.nav-btn[data-nav="${id}"]`);
+    if(desktop) desktop.click();
+    else {
+      $$('.view').forEach(v=>v.classList.add('hidden'));
+      $('#view-'+id).classList.remove('hidden');
+      if(id==='evidence') loadEvidenceList();
+      if(id==='blockchain') loadBlockchain();
+      if(id==='status') loadStatusPage();
+      if(id==='investigate') setTimeout(restorePipelineVerifyState, 0);
+    }
+  });
+});
+
+async function loadStatus(){
+  try{
+    const r=await fetch('/api/status'); const j=await r.json();
+    $('#status-mini').innerHTML=`<span class="text-cyan">${j.face.status}</span> · <span class="${j.blockchain.mode.includes('Web3')?'text-success':'text-zinc-400'}">${j.blockchain.mode}</span>`;
+    const md=$('#status-mini-drawer'); if(md) md.innerHTML=`<span class="text-cyan">${j.face.status}</span> · ${j.blockchain.mode}`;
+    const m=$('#status-mini-m'); if(m) m.textContent=j.blockchain.mode;
+    return j;
+  }catch(e){ $('#status-mini').textContent='status error'; }
+}
+async function loadStatusPage(){
+  const j=await loadStatus();
+  if(!j) return;
+  $('#status-panel').innerHTML=`
+    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">FACE VERIFICATION</div><div class="mt-2 text-sm font-medium text-violet">${j.face.method}</div><div class="mono text-xs text-zinc-400 mt-1">${j.face.status}</div><div class="mono text-xs text-zinc-500 mt-2">${j.face.detail}</div></div>
+    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">BLOCKCHAIN</div><div class="mt-2 text-sm font-medium ${j.blockchain.mode.includes('Web3')?'text-success':'text-zinc-300'}">${j.blockchain.mode}</div><div class="mono text-xs text-zinc-400 mt-1">${j.blockchain.detail||''}</div><div class="mono text-xs hash mt-2">${j.blockchain.contract_address||'— not configured'}</div></div>
+    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">EVIDENCE VERIFIER</div><div class="mt-2 text-sm font-medium text-success">${j.verifier.status}</div><div class="mono text-xs text-zinc-500 mt-1">${j.verifier.detail}</div><div class="mono text-xs mt-2">data/evidence/ · data/blockchain/</div></div>
+    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">CONTRACT</div><div class="mt-2 mono text-xs hash ${j.blockchain.contract_address?'text-white':'text-zinc-500'}">${j.blockchain.contract_address||'Not configured — set CONTRACT_ADDRESS in .env'}</div><div class="text-[11px] text-zinc-600 mt-2">EvidenceRegistry.sol — register(bytes32) · verify(bytes32)</div></div>
+  `;
+  $('#blockchain-panel').innerHTML=`<div>Mode: <span class="text-white">${j.blockchain.mode}</span></div><div>RPC: <span class="text-cyan">${j.blockchain.rpc_url||'—'}</span></div><div>Contract: <span class="hash text-white">${j.blockchain.contract_address||'—'}</span></div><div class="text-zinc-500">Evidence hash ≠ transaction hash — only root hash anchored.</div>`;
+}
+async function loadEvidenceList(){
+  const r=await fetch('/api/evidence/list'); const arr=await r.json();
+  $('#evidence-list').innerHTML = arr.map(e=>`<div class="card rounded-lg p-3 flex items-center gap-3"><div class="flex-1 min-w-0"><div class="mono text-xs hash text-white">${e.full_hash||e.evidence_hash}</div><div class="mono text-[11px] text-zinc-500">${e.name} · ${e.candidates} candidates · ${e.created_at||''}</div></div><button onclick="document.getElementById('evidence-path').value='${e.path}'; document.getElementById('btn-open-evidence').click()" class="mono text-xs px-2 py-1 rounded bg-surface border border-borderc">Inspect</button><button onclick="document.getElementById('verify-path').value='${e.path}'; document.querySelector('[data-nav=verification]').click()" class="mono text-xs px-2 py-1 rounded bg-cyan text-black">Verify</button></div>`).join('') || '<div class="mono text-xs text-zinc-500">No evidence yet — run Investigate.</div>';
+}
+async function loadBlockchain(){ await loadStatusPage(); }
+
+$('#btn-open-evidence').addEventListener('click', async ()=>{
+  const p=$('#evidence-path').value.trim(); if(!p) return;
+  // fetch file via evidence_file (basename only, no path leak)
+  const name= p.split('/').pop();
+  let url='/evidence_file/'+name;
+  const res=await fetch(url);
+  if(!res.ok){
+    const r2=await fetch('/api/verify?chain=0', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path:p})});
+    $('#evidence-preview').textContent=JSON.stringify(await r2.json(), null, 2);
+  } else {
+    const t=await res.text();
+    $('#evidence-preview').textContent=t.slice(0,8000);
+  }
+  $('#evidence-preview').classList.remove('hidden');
+});
+
+// Upload
+const drop=$('#drop'), file=$('#file');
+drop.addEventListener('click', ()=> { if(!isInvestigating) file.click(); });
+drop.addEventListener('dragover', e=>{e.preventDefault(); if(!isInvestigating) drop.classList.add('border-cyan/40')});
+drop.addEventListener('dragleave', ()=> drop.classList.remove('border-cyan/40'));
+drop.addEventListener('drop', e=>{e.preventDefault(); drop.classList.remove('border-cyan/40'); if(isInvestigating) return; if(e.dataTransfer.files[0]){file.files=e.dataTransfer.files; handleFile();}});
+file.addEventListener('change', handleFile);
+
+async function handleFile(){
+  if(!file.files[0] || isInvestigating) return;
+  isInvestigating = true;
+  const dropLabel=$('#drop');
+  dropLabel.style.pointerEvents='none'; dropLabel.style.opacity='0.6';
+  $('#upload-meta').classList.remove('hidden');
+  $('#upload-meta').innerHTML = `<span class="spinner"></span>` + file.files[0].name + ' · ' + (file.files[0].size/1024).toFixed(1)+' KB — processing…';
+  $('#pipeline').classList.remove('hidden');
+  $('#pipeline-error').classList.add('hidden'); $('#pipeline-error').textContent='';
+  setStep('s-discovery','step-active', 'searching…');
+  $('#pipeline-status').innerHTML='<span class="spinner"></span> running…';
+  $('#progress-bar').style.width='15%';
+  $('#results').classList.add('hidden');
+  const fd=new FormData(); fd.append('image', file.files[0]); fd.append('anchor', $('#anchor-check').checked?'true':'false');
+  try{
+    const res=await fetch('/api/investigate', {method:'POST', body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.error||res.statusText);
+    renderResult(j);
+  }catch(e){
+    $('#pipeline-status').innerHTML='error';
+    $('#pipeline-error').textContent = e.message;
+    $('#pipeline-error').classList.remove('hidden');
+    $('#s-discovery-detail').textContent=e.message.slice(0,120);
+  } finally {
+    isInvestigating=false;
+    dropLabel.style.pointerEvents=''; dropLabel.style.opacity='';
+    $('#upload-meta').innerHTML = file.files[0] ? (file.files[0].name + ' · ' + (file.files[0].size/1024).toFixed(1)+' KB') : '';
+  }
+}
+
+function setStep(id, cls, detail){
+  const el=document.getElementById(id);
+  el.className='card rounded-lg p-3 text-center '+cls;
+  if(detail) el.querySelector('div:last-child').textContent=detail;
+}
+
+function renderResult(j){
+  $('#results').classList.remove('hidden');
+  $('#query-img').src=j.query_url;
+  $('#query-caption').textContent=j.query_url.split('/').pop();
+  const zeroCandidates = j.candidates.length===0;
+  if(zeroCandidates){
+    setStep('s-discovery','step-done', '0 found — sealed with 0 candidates');
+  } else {
+    setStep('s-discovery', j.discovery.candidate_count>0?'step-done':'step-done', j.discovery.candidate_count+' found · '+j.discovery.acquired_count+' acquired');
+  }
+  const verifiedCount = Object.keys(j.verification_results||{}).length;
+  setStep('s-verification','step-done', verifiedCount+' verified · buffalo_l');
+  // Hashing is done if evidence_hash exists, even with zero candidates
+  if(j.evidence_hash){
+    setStep('s-hashing','step-done', j.evidence_hash.slice(0,8)+'… sealed');
+    $('#ev-cands').textContent = j.candidates.length;
+    $('#ev-hashes').textContent = j.candidates.filter(c=>c.evidence_hash).length + ' ✓';
+  } else {
+    setStep('s-hashing','step-active','hashing…');
+  }
+  if(j.anchor){ setStep('s-anchor','step-done','block '+j.anchor.block_number); } else { setStep('s-anchor','step-pending','not anchored'); }
+  setStep('s-verify','step-pending','ready to verify');
+  $('#progress-bar').style.width=j.evidence_hash ? (j.anchor?'100%':'75%') : '40%';
+  $('#pipeline-status').innerHTML=j.anchor?'anchored':'<span class="text-success">●</span> sealed';
+
+  // candidates
+  const grid=$('#candidate-grid');
+  if(zeroCandidates){
+    grid.innerHTML=''; $('#no-candidates').classList.remove('hidden');
+  } else {
+    $('#no-candidates').classList.add('hidden');
+    grid.innerHTML=j.candidates.map(c=>{
+      const s=c.status; const ok=s==='success';
+      const v=c.verification||{}; const dec=v.decision||'—';
+      const color=dec==='match'?'text-success':dec==='no_match'?'text-zinc-400':dec==='inconclusive'?'text-amber':'text-danger';
+      const img=c.image_url?`<img src="${c.image_url}" class="w-full h-full object-cover">`:'';
+      const failure = c.failure_reason ? `<div class="mono text-[11px] text-amber mt-1">${c.failure_reason}</div>` : '';
+      const multiNote = c.is_multi_face ? `<div class="mono text-[10px] text-violet mt-1">Multiple faces detected — best similarity selected (${c.faces_detected} faces)</div>` : '';
+      return `<div class="card rounded-lg overflow-hidden card-hover"><div class="h-36 bg-black flex items-center justify-center overflow-hidden">${ok&&img?img:`<span class="mono text-xs text-zinc-600">${s}</span>`}</div><div class="p-3"><div class="flex items-center justify-between"><span class="mono text-xs text-white">${c.candidate_id}</span><span class="mono text-[10px] px-1.5 py-0.5 rounded border ${ok?'border-success/40 text-success':'border-zinc-600 text-zinc-500'}">${s}</span></div><div class="mono text-[11px] text-zinc-500 mt-1">rank #${c.search_rank} · ${c.discovery_provider}</div><div class="mono text-[10px] hash text-zinc-400 mt-1 truncate">${c.content_sha256?c.content_sha256.slice(0,16)+'…':''}</div><div class="mt-2 text-xs ${color}">${dec} ${v.score? '· '+v.score:''}</div>${failure}${multiNote}</div></div>`;
+    }).join('');
+  }
+
+  // verification
+  const vgrid=$('#verify-grid');
+  const successCands = j.candidates.filter(c=>c.status==='success');
+  if(successCands.length===0){
+    vgrid.innerHTML='<div class="mono text-xs text-zinc-500">No successful acquisitions to verify — evidence sealed with 0 candidates.</div>';
+  } else {
+  vgrid.innerHTML=successCands.map(c=>{
+    const v=c.verification||{}; const dec=v.decision;
+    let border='border-zinc-700', badge='bg-zinc-800 text-zinc-400', label=dec||'pending';
+    if(dec==='match'){border='border-success/40'; badge='bg-success/15 text-success border border-success/30'; label='MATCH'}
+    else if(dec==='no_match'){border='border-zinc-600'; badge='bg-zinc-800 text-zinc-300'; label='NO MATCH'}
+    else if(dec==='inconclusive'){border='border-amber/40'; badge='bg-amber/15 text-amber border border-amber/30'; label='INCONCLUSIVE'}
+    else if(dec==='error'){border='border-danger/40'; badge='bg-danger/15 text-danger'; label='ERROR'}
+    const score=v.score?`<span class="mono text-lg font-medium text-white">${v.score}</span>`:'<span class="mono text-xs text-zinc-500">—</span>';
+    const multiNote = c.is_multi_face ? `<div class="mono text-[11px] text-violet mt-1">Multiple faces detected — best similarity selected (${c.faces_detected} faces)</div>` : '';
+    return `<div class="card rounded-lg p-4 border ${border}"><div class="flex gap-3"><div class="flex-1 text-center"><div class="text-[10px] tracking-widest text-zinc-500">QUERY</div><img src="${j.query_url}" class="w-full h-28 object-cover rounded border border-borderc mt-1"></div><div class="flex items-center text-zinc-600">↔</div><div class="flex-1 text-center"><div class="text-[10px] tracking-widest text-zinc-500">${c.candidate_id}</div>${c.image_url?`<img src="${c.image_url}" class="w-full h-28 object-cover rounded border border-borderc mt-1">`:`<div class="h-28 rounded border border-borderc mt-1 bg-black flex items-center justify-center mono text-xs text-zinc-600">no image</div>`}</div></div><div class="mt-3 text-center"><span class="mono text-xs px-2 py-1 rounded ${badge}">${label}</span><div class="mt-2">${score}</div><div class="mono text-[10px] text-zinc-500 mt-1">${v.method||''} ${v.error? '· '+v.error.slice(0,80):''}</div><div class="mono text-[10px] text-zinc-600 mt-1">qfd:${String(v.query_face_detected)} · cfd:${String(v.candidate_face_detected)}</div>${multiNote}</div></div>`;
+  }).join('');
+  }
+
+  // evidence
+  $('#root-hash').textContent = j.evidence_hash.match(/.{1,32}/g).join('\n');
+  $('#ev-cands').textContent = j.candidates.length;
+  $('#ev-hashes').textContent = j.candidates.filter(c=>c.evidence_hash).length + ' ✓';
+  $('#evidence-details').textContent = JSON.stringify(j.candidates.map(c=>({candidate_id:c.candidate_id, evidence_hash:c.evidence_hash, verification:c.verification, faces_detected:c.faces_detected||null})), null, 2);
+  lastEvidencePath=j.evidence_path;
+  $('#btn-view-evidence').onclick=()=>{ $('#evidence-path').value=j.evidence_path; document.querySelector('[data-nav=evidence]').click(); };
+
+  // anchor
+  const a=j.anchor;
+  if(a){
+    $('#anchor-status').textContent='ANCHORED'; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-success/15 text-success border border-success/30';
+    $('#anchor-details').classList.remove('hidden');
+    $('#anchor-contract').textContent=a.contract_address;
+    $('#anchor-tx').textContent=a.transaction_hash;
+    $('#anchor-block').textContent='#'+a.block_number;
+    lastAnchor=a;
+  } else {
+    $('#anchor-status').textContent='NOT REGISTERED — evidence cryptographically sealed, anchor optional'; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-amber/15 text-amber border border-amber/30';
+    $('#anchor-details').classList.add('hidden');
+  }
+
+  // scroll to results
+  document.getElementById('results').scrollIntoView({behavior:'smooth'});
+}
+
+// Verification view
+$('#btn-verify').addEventListener('click', async ()=>{
+  let path=$('#verify-path').value.trim();
+  const fileInp=$('#verify-file');
+  if(fileInp.files[0]){
+    const fd=new FormData(); fd.append('evidence', fileInp.files[0]);
+    const chain=$('#verify-chain').checked?'1':'0';
+    const r=await fetch('/api/verify?chain='+chain, {method:'POST', body:fd});
+    const j=await r.json(); showVerify(j);
+    return;
+  }
+  if(!path) return;
+  const chain=$('#verify-chain').checked;
+  const r=await fetch('/api/verify?chain='+(chain?'1':'0'), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path})});
+  const j=await r.json(); showVerify(j);
+});
+$('#verify-file').addEventListener('change', ()=>{ if($('#verify-file').files[0]) $('#verify-path').value=$('#verify-file').files[0].name; });
+
+function showVerify(j){
+  if(j.error){ $('#verify-result').classList.remove('hidden'); $('#verify-badge').className='rounded-xl p-5 border bg-danger/10 border-danger/40 text-center'; $('#verify-badge').innerHTML='<div class="text-danger font-semibold">✕ VERIFICATION FAILED</div><div class="mono text-xs text-zinc-400 mt-1">'+j.error+'</div>'; return; }
+  // Sync Evidence Pipeline Step 05 immediately (do not falsely affect Step 04 anchor)
+  try { syncPipelineVerifyState(j); } catch(e){}
+  $('#verify-result').classList.remove('hidden');
+  const valid=j.valid;
+  const onChain=j.on_chain;
+  const badge=$('#verify-badge');
+  if(valid && onChain){ badge.className='rounded-xl p-5 border bg-success/10 border-success/30 text-center'; badge.innerHTML='<div class="text-success font-semibold">✓ VALID + ON-CHAIN</div><div class="mono text-xs text-zinc-400 mt-1">Candidate hashes ✓ · Root hash ✓ · Anchor found</div>'; }
+  else if(valid){ badge.className='rounded-xl p-5 border bg-success/10 border-success/30 text-center'; badge.innerHTML='<div class="text-success font-semibold">✓ VALID EVIDENCE</div><div class="mono text-xs text-zinc-400 mt-1">Candidate hashes ✓ · Root hash ✓ · Not checked on-chain</div>'; }
+  else { badge.className='rounded-xl p-5 border bg-danger/10 border-danger/40 text-center'; badge.innerHTML='<div class="text-danger font-semibold">✕ TAMPER DETECTED</div><div class="mono text-xs text-zinc-400 mt-1">Evidence has been modified — see mismatches</div>'; }
+  const steps=[
+    ['CHECKING CANDIDATE HASHES', j.candidate_hashes_valid],
+    ['RECOMPUTING ROOT HASH', j.root_hash_valid],
+    ['CHECKING EVIDENCE ORDER', j.root_hash_valid],
+    ['CHECKING TIMELINE INTEGRITY', j.root_hash_valid],
+    ['CHECKING BLOCKCHAIN ANCHOR', j.on_chain===true ? true : j.on_chain===false ? false : null],
+  ];
+  $('#verify-steps').innerHTML=steps.map(([label, ok])=>`<div class="flex items-center gap-2"><span class="${ok===true?'text-success':ok===false?'text-danger':'text-zinc-500'}">${ok===true?'✓':ok===false?'✕':'○'}</span><span class="${ok===true?'text-zinc-300':ok===false?'text-danger':'text-zinc-500'}">${label}</span><span class="ml-auto mono text-[10px] ${ok===true?'text-success':ok===false?'text-danger':'text-zinc-600'}">${ok===true?'OK':ok===false?'FAIL':'—'}</span></div>`).join('');
+  $('#verify-mismatches').textContent = (j.mismatches&&j.mismatches.length)? JSON.stringify(j.mismatches, null, 2) : '— no mismatches —';
+  lastEvidencePath = j.stored_hash ? ('data/evidence/evidence_'+j.stored_hash.slice(0,8)+'*.json') : lastEvidencePath;
+}
+
+$$('.tamper-btn').forEach(b=>{
+  b.addEventListener('click', async ()=>{
+    const field=b.dataset.tamper;
+    let path=$('#verify-path').value.trim() || lastEvidencePath || 'data/evidence/evidence_demo-e2e-0001.json';
+    if(path.includes('*')){
+      const r=await fetch('/api/evidence/list'); const arr=await r.json(); if(arr[0]) path=arr[0].path;
+    }
+    const r=await fetch('/api/tamper_demo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, field})});
+    const j=await r.json();
+    $('#verify-path').value=j.tampered_path;
+    showVerify(j.result);
+  });
+});
+
+// init
+loadStatus(); loadEvidenceList();
+</script>
+</body>
+</html>

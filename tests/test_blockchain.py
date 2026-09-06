@@ -234,5 +234,103 @@ class TestNoWeb3DependencyForCoreTests(unittest.TestCase):
         self.assertIsNotNone(client.verify(h))
 
 
+class TestWeb3ReceiptStatus(unittest.TestCase):
+    """Regression: Web3BlockchainClient must reject reverted receipts (status !=1)."""
+
+    def _make_client_with_mock(self, receipt_status):
+        from unittest.mock import MagicMock, PropertyMock
+        from blockchain.client import Web3BlockchainClient
+
+        # Patch Web3 and Account imports via mocking __init__ collaborators
+        mock_w3 = MagicMock()
+        mock_contract = MagicMock()
+        mock_receipt = MagicMock()
+        mock_receipt.status = receipt_status
+        mock_receipt.blockNumber = 42
+        mock_w3.eth.get_transaction_count.return_value = 0
+        mock_w3.eth.gas_price = 1
+        mock_w3.eth.send_raw_transaction.return_value = bytes.fromhex("ab" * 32)
+        mock_w3.eth.wait_for_transaction_receipt.return_value = mock_receipt
+        mock_w3.is_connected.return_value = True
+        mock_w3.to_checksum_address.side_effect = lambda x: x
+
+        mock_account = MagicMock()
+        mock_account.address = "0x0000000000000000000000000000000000000000"
+        mock_signed = MagicMock()
+        mock_signed.raw_transaction = b"\xab" * 32
+        mock_account.sign_transaction.return_value = mock_signed
+
+        # Build client without hitting network: patch internal attributes after construction bypass
+        # Use __new__ to avoid __init__ side effects, then manually set fields
+        client = Web3BlockchainClient.__new__(Web3BlockchainClient)
+        client.rpc_url = "http://127.0.0.1:8545"
+        client.chain_id = 1337
+        client.contract_address = "0x0000000000000000000000000000000000000000"
+        client.private_key = "0x" + "00" * 32
+        client.abi = []
+        client.w3 = mock_w3
+        client.account = mock_account
+        client.contract = mock_contract
+        # contract register builder chain
+        mock_contract.functions.register.return_value.build_transaction.return_value = {}
+        return client, mock_w3, mock_receipt
+
+    def test_success_receipt_status_1_succeeds(self):
+        client, _, receipt = self._make_client_with_mock(receipt_status=1)
+        h = "bb" * 32
+        anchor = client.register(h)
+        self.assertEqual(anchor["evidence_hash"], h)
+        self.assertEqual(anchor["block_number"], 42)
+        self.assertIn("transaction_hash", anchor)
+
+    def test_reverted_receipt_status_0_raises(self):
+        client, _, receipt = self._make_client_with_mock(receipt_status=0)
+        h = "cc" * 32
+        with self.assertRaises(RuntimeError) as ctx:
+            client.register(h)
+        self.assertIn("reverted", str(ctx.exception).lower())
+        self.assertIn("status=0", str(ctx.exception))
+
+    def test_duplicate_cannot_be_reported_as_success(self):
+        # Simulate contract revert on duplicate (status 0) must not return anchor
+        client, _, _ = self._make_client_with_mock(receipt_status=0)
+        h = "dd" * 32
+        with self.assertRaises(RuntimeError):
+            client.register(h)
+        # No anchor should be returned; exception ensures caller cannot treat as success
+
+    def test_status_none_treated_as_success_for_legacy_nodes(self):
+        # If node returns no status field (pre-Byzantium), legacy behaviour preserves success
+        from unittest.mock import MagicMock
+        from blockchain.client import Web3BlockchainClient
+
+        client, mock_w3, _ = self._make_client_with_mock(receipt_status=1)
+        # Override receipt to have no status attribute
+        legacy_receipt = MagicMock()
+        # delete status attr
+        del legacy_receipt.status
+        legacy_receipt.blockNumber = 99
+        # Make it dict-like fallback without status key
+        legacy_receipt.__class__ = type("LegacyReceipt", (), {"__getattr__": lambda self, k: (_ for _ in ()).throw(AttributeError(k))})  # noqa
+        # Simpler: use SimpleNamespace-like object
+        class SimpleReceipt:
+            blockNumber = 99
+        mock_w3.eth.wait_for_transaction_receipt.return_value = SimpleReceipt()
+        h = "ee" * 32
+        anchor = client.register(h)
+        self.assertEqual(anchor["block_number"], 99)
+
+    def test_inmemory_unchanged(self):
+        # Ensure InMemory still rejects duplicate via ValueError, not RuntimeError path
+        from blockchain.client import InMemoryBlockchainClient
+
+        c = InMemoryBlockchainClient()
+        h = "ff" * 32
+        c.register(h)
+        with self.assertRaises(ValueError):
+            c.register(h)
+        self.assertIsNotNone(c.verify(h))
+
+
 if __name__ == "__main__":
     unittest.main()

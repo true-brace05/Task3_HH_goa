@@ -186,13 +186,19 @@ class Web3BlockchainClient(BlockchainClient):
             raw_tx = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
             tx_hash = self.w3.eth.send_raw_transaction(raw_tx)
             receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+            status = getattr(receipt, "status", None)
+            # Explicitly handle dict-like receipts
+            if status is None and isinstance(receipt, dict):
+                status = receipt.get("status")
+            if status is not None and int(status) != 1:
+                raise RuntimeError(f"blockchain transaction reverted (status={status}) for evidence_hash {h} tx {tx_hash.hex()} block {getattr(receipt, 'blockNumber', receipt.get('blockNumber') if isinstance(receipt, dict) else '?')}")
             return {
                 "evidence_hash": h,
                 "submitter": self.account.address,
                 "timestamp": int(time.time()),
                 "manifest_uri": manifest_uri,
                 "transaction_hash": tx_hash.hex(),
-                "block_number": receipt.blockNumber,
+                "block_number": receipt.blockNumber if hasattr(receipt, "blockNumber") else receipt.get("blockNumber"),  # type: ignore
                 "contract_address": self.contract_address,
             }
         except Exception as e:
