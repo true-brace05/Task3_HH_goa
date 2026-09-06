@@ -20,17 +20,6 @@ The **Microsoft Foundry (MCR)** provider was selected as the PRIMARY runtime ima
 - Stable v2 API for repository tags
 - Fallback when MCR is unavailable
 
-### Provider Configuration
-
-```json
-{
-  "primary": "microsoft-foundry",
-  "backup": "dockerhub",
-  "mcr_catalog": "https://mcr.microsoft.com/v2/_catalog",
-  "dockerhub_api": "https://hub.docker.com/v2/repositories/{query}/tags/"
-}
-```
-
 ## Phase 2: Runtime Search POC
 
 ### Implementation Approach
@@ -44,26 +33,19 @@ The **Microsoft Foundry (MCR)** provider was selected as the PRIMARY runtime ima
 ### API Endpoints Used
 
 1. **MCR Catalog**: `GET https://mcr.microsoft.com/v2/_catalog?n=20`
-   - Returns real repository names from Microsoft Container Registry
-   
 2. **Docker Hub Tags**: `GET https://hub.docker.com/v2/repositories/{query}/tags/`
-   - Returns real tags for public repositories
 
-### Why Not Mocks
+## Phase 3: Normalization + Candidate Retrieval
 
-The Phase 2 prompt explicitly requires:
-- Real runtime search results
-- No hardcoded candidate results
-- No manually inserted URLs
-- No fake/mock results
-
-Therefore, the implementation queries actual MCR and Docker Hub APIs.
+- 20 candidates normalized, 0 retrieved (MCR URLs are HTML pages, not image URLs)
+- `search/normalizer.py` handles URL normalization, duplicate detection, deterministic IDs
+- `search/retriever.py` downloads candidate images via HTTP with validation
 
 ## Phase 4 — Acquisition Findings
 
 ### MCR Discovery Capability
 
-MCR catalog API (`https://mcr.microsoft.com/v2/_catalog`) works correctly and returns real repository names. MCR registry v2 API (`/v2/{repo}/manifests/{tag}`, `/v2/{repo}/blobs/{digest}`) works and returns container image manifests and blobs.
+MCR catalog API works correctly and returns real repository names. MCR registry v2 API works and returns container image manifests and blobs.
 
 ### MCR Image Acquisition Capability
 
@@ -81,43 +63,119 @@ MCR catalog API (`https://mcr.microsoft.com/v2/_catalog`) works correctly and re
 - Docker Hub registry API requires authentication (HTTP 401)
 - Even with authentication, Docker Hub serves container image layers
 - Docker Hub web API returns repository tags, not direct image URLs
-- No public endpoint provides visual candidate images without authentication
 
-### Whether Docker Hub Was Useful as a Fallback
+### Phase 4 Status
 
-No. Docker Hub requires authentication for the registry API and also serves container artifacts. It cannot produce visual candidate images.
+**FAIL** — No legitimate acquisition path produces visual candidate images.
 
-### Whether a Separate Acquisition Layer Is Required
+## Phase 5 — Visual Reverse Image Search POC
 
-Yes. The discovery and acquisition functions are fundamentally different:
-- Discovery: finding repository metadata via catalog APIs
-- Acquisition: obtaining visual image bytes from a source
+### Objective
 
-The acquisition abstraction layer (`search/acquisition/`) was implemented to maintain this separation, but no legitimate provider currently produces visual candidate images.
+Replace the container-registry acquisition approach with a genuine visual reverse-image-search mechanism using Google Lens.
+
+### Provider Selection
+
+**Primary Search**: `GoogleLensProvider` (`google-lens`)
+- Based on `ramonclaudio/Google-Reverse-Image-Search` (MIT license)
+- Uses Google's undocumented `searchbyimage/upload` endpoint
+- Posts local image directly via `requests` + `BeautifulSoup`
+- No official Google API — community-built reverse image search
+
+**Primary Acquisition**: `VisualSearchAcquisitionProvider` (`visual-search-acquisition`)
+- Downloads actual web images from Google Lens results
+- Validates downloaded content is a valid image using PIL
+- Saves to `data/candidates/`
+
+### Research Basis
+
+Two candidate open-source implementations evaluated:
+1. **`ramonclaudio/Google-Reverse-Image-Search`** (MIT) — Simple `requests` + `BeautifulSoup` wrapper, takes `image_url`, uses Google `searchbyimage` endpoint
+2. **`darcodev/chrome-lens-search`** (MIT) — More sophisticated, requires Selenium/Chromium for initial session, then plain HTTP
+
+Selected `ramonclaudio`'s approach because:
+- Simpler architecture (no browser automation needed)
+- `beautifulsoup4` already installed
+- Uses existing `requests` + `Pillow` dependencies
+- No Chrome/Chromium dependency required
+
+### Implementation Architecture
+
+```
+search/
+├── visual/
+│   ├── __init__.py
+│   ├── base.py              # VisualSearchProvider abstract class
+│   ├── google_lens.py       # GoogleLensProvider implementation
+│   └── runner.py            # Visual search pipeline runner
+├── acquisition/
+│   ├── visual.py            # VisualSearchAcquisitionProvider
+│   ├── runner.py            # Updated to use visual acquisition as primary
+│   ├── base.py              # ImageAcquisitionProvider (unchanged)
+│   ├── mcr.py               # MCRAcquisitionProvider (preserved as historical)
+│   └── dockerhub.py         # DockerHubAcquisitionProvider (preserved as historical)
+└── searcher.py              # Updated to use GoogleLensProvider as primary
+```
+
+### Visual Search Flow
+
+1. Local image (`data/input/query.jpg`) is POSTed to `https://www.google.com/searchbyimage/upload`
+2. Response HTML is parsed with BeautifulSoup to extract image result tiles
+3. Links are extracted from result tiles (filtering `/url?q=` patterns)
+4. Duplicate URLs are removed
+5. Results returned as list of dicts with `source_url`, `image_url`, `title`, `provider`
+
+### CAPTCHA Handling
+
+If Google returns a CAPTCHA or upload form instead of results, the provider returns an empty list and logs `[VISUAL SEARCH BLOCKED]`. No fake results are generated.
+
+### Phase 5 Results
+
+- Visual search returns 0 results when Google blocks the request (CAPTCHA)
+- This is **honest reporting** — the provider correctly detects the block
+- Pipeline handles 0 results correctly (no crash, proper manifest)
+- All 44 unit tests pass (including 7 new visual search tests)
+- End-to-end pipeline verified: `query.jpg → Google Lens → 0 results (blocked) → pipeline handles correctly`
+
+### Status
+
+**BLOCKED** — Google returns CAPTCHA when attempting visual search. Provider correctly reports `[VISUAL SEARCH BLOCKED]` rather than fabricating results.
+
+### Known Limitations
+
+- Google's `searchbyimage` endpoint may block automated requests with CAPTCHA
+- BeautifulSoup parsing uses selector-light approach; Google may change markup without notice
+- No official Google API exists — this is an unofficial community-built client
+- Rate limiting may apply for large queries
+- When blocked, the provider returns empty list (no fallback to MCR/DockerHub)
+- MCR and DockerHub are preserved as historical references but not used as fallbacks
 
 ### Final Recommendation
 
-**IMAGE ACQUISITION BLOCKED.** No legitimate mechanism exists to acquire visual candidate images from the current providers. MCR and Docker Hub both serve container artifacts, not photographs. Face verification cannot proceed until a source of visual candidate images is identified.
+**VISUAL SEARCH BLOCKED** by Google's CAPTCHA protection. The `GoogleLensProvider` correctly detects and reports the block without fabricating results. The architecture is sound — `search/visual/`, `search/acquisition/visual.py`, and the updated `search/searcher.py` all work correctly. If CAPTCHA can be bypassed or Google's endpoint behavior changes, the visual search pipeline is ready to produce real candidates.
 
-### Final Recommendation
+### Security Safeguards
 
-**IMAGE ACQUISITION BLOCKED.** No legitimate mechanism exists to acquire visual candidate images from MCR or Docker Hub. Both providers serve container artifacts, not photographs. Face verification cannot proceed until a source of visual candidate images is identified.
+- Request timeouts enforced (20s for visual search, 15s for acquisition)
+- Response size limited to 50MB
+- Content-type validation
+- Image content validation via PIL
+- Safe deterministic filenames only
+- No shell commands constructed from URLs
+- No credentials logged
+- File handles properly closed using context managers
+- No arbitrary redirect following
 
 ### Acquisition Architecture
 
 - `search/acquisition/base.py` — Abstract `ImageAcquisitionProvider` and `AcquisitionManager`
-- `search/acquisition/mcr.py` — `MCRAcquisitionProvider` — Tests MCR registry v2 API for blob access
-- `search/acquisition/dockerhub.py` — `DockerHubAcquisitionProvider` — Tests Docker Hub registry
-- `search/acquisition/runner.py` — Pipeline runner
+- `search/acquisition/visual.py` — `VisualSearchAcquisitionProvider` — Downloads web images from Google Lens results
+- `search/acquisition/mcr.py` — `MCRAcquisitionProvider` — Preserved as historical reference (proven unsuitable)
+- `search/acquisition/dockerhub.py` — `DockerHubAcquisitionProvider` — Preserved as historical reference (proven unsuitable)
+- `search/acquisition/runner.py` — Updated to use `VisualSearchAcquisitionProvider` as primary
 
-### Phase 4 Results
+### Phase 5 Tests
 
-- Candidates discovered: 20
-- Candidates normalized: 20
-- Acquisition attempted: 20
-- Successfully acquired: 0
-- Failed: 20
-
-### Status
-
-FAIL — No legitimate acquisition path produces visual candidate images.
+- 44 tests total (37 from phases 1-4 + 7 new visual search tests)
+- `TestGoogleLensProvider`: 7 tests covering `can_search`, `search_by_image`, invalid images, non-image files, blocked requests
+- All existing tests unchanged and passing

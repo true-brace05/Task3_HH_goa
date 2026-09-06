@@ -6,14 +6,16 @@ from datetime import datetime, timezone
 from search.acquisition.base import AcquisitionManager
 from search.acquisition.mcr import MCRAcquisitionProvider
 from search.acquisition.dockerhub import DockerHubAcquisitionProvider
+from search.acquisition.visual import VisualSearchAcquisitionProvider
 
 logger = logging.getLogger(__name__)
 
 
 def run_acquisition_pipeline(candidates: list) -> dict:
+    visual_provider = VisualSearchAcquisitionProvider()
     mcr_provider = MCRAcquisitionProvider()
     docker_provider = DockerHubAcquisitionProvider()
-    manager = AcquisitionManager(primary_provider=mcr_provider, backup_provider=docker_provider)
+    manager = AcquisitionManager(primary_provider=visual_provider, backup_provider=None)
 
     results = manager.acquire_batch(candidates)
 

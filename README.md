@@ -1,10 +1,65 @@
-# Runtime Discovery POC
+# Runtime Discovery POC — Phase 5: Visual Reverse Image Search
 
-## Selected Primary Provider
+## Phase 5 Overview
 
-**Microsoft Foundry (MCR)** — `mcr.microsoft.com`
+### Objective
 
-The Microsoft Container Registry is used as the primary runtime image search provider. It provides real container image catalog data through the MCR v2 registry API.
+Replace the container-registry acquisition approach with a genuine visual reverse-image-search mechanism using Google Lens.
+
+### Architecture
+
+```
+Local query image → Google Lens visual search → Web image candidates → Image acquisition → Local candidates → Manifest
+```
+
+- **`search/visual/base.py`** — `VisualSearchProvider` abstract base class
+- **`search/visual/google_lens.py`** — `GoogleLensProvider` — POSTs local image to Google's searchbyimage upload endpoint, parses HTML results
+- **`search/visual/runner.py`** — Visual search pipeline runner
+- **`search/acquisition/visual.py`** — `VisualSearchAcquisitionProvider` — downloads actual web images from Google Lens results
+- **`search/searcher.py`** — Updated to use `GoogleLensProvider` as PRIMARY search mechanism
+- **`search/acquisition/runner.py`** — Updated to use `VisualSearchAcquisitionProvider` as PRIMARY acquisition
+
+### Provider Selection
+
+**Primary**: `GoogleLensProvider` (`google-lens`) — Uses Google's `searchbyimage/upload` endpoint via `requests` + `BeautifulSoup`
+
+**Acquisition**: `VisualSearchAcquisitionProvider` (`visual-search-acquisition`) — Downloads images from web URLs returned by Google Lens
+
+### Research Basis
+
+Based on `ramonclaudio/Google-Reverse-Image-Search` (MIT license):
+- Uses Google's undocumented `searchbyimage` endpoint
+- No official Google API exists for reverse image search
+- Implementation scrapes the endpoint behind a Python wrapper
+- `beautifulsoup4` already installed in environment
+
+### Usage
+
+```python
+from search.searcher import search_image
+from search.visual.google_lens import GoogleLensProvider
+
+# Basic visual search
+results = search_image("data/input/query.jpg")
+print(f"Candidates: {len(results)}")
+
+# Direct provider usage
+provider = GoogleLensProvider()
+results = provider.search_by_image("data/input/query.jpg")
+```
+
+Or run the full pipeline:
+
+```python
+from search.visual.runner import run_pipeline
+manifest = run_pipeline("data/input/query.jpg")
+```
+
+Or via CLI:
+
+```bash
+python -m search.visual.runner
+```
 
 ## Dependencies
 
@@ -12,88 +67,47 @@ The Microsoft Container Registry is used as the primary runtime image search pro
 pip install -r requirements.txt
 ```
 
-## Configuration
+Dependencies: `Pillow>=10.0.0`, `requests>=2.28.0`, `beautifulsoup4>=4.12.0`
 
-Copy `.env.example` to `.env` and adjust as needed:
+## How It Works
 
-```bash
-cp .env.example .env
-```
+### Visual Search Flow
 
-No API keys are required for the MCR catalog endpoint.
+1. **Image Upload**: Local image file is POSTed to `https://www.google.com/searchbyimage/upload`
+2. **HTML Parsing**: Response HTML is parsed with BeautifulSoup to extract image result tiles
+3. **URL Extraction**: Links are extracted from result tiles, filtering for `/url?q=` patterns
+4. **Deduplication**: Duplicate URLs are removed
+5. **Result Format**: Returns list of dicts with `source_url`, `image_url`, `title`, `provider`
 
-## Running the POC
+### Acquisition Flow
 
-```python
-from search.searcher import search_image, run_search_and_save
+1. **Candidate Validation**: Each candidate from visual search is checked by `VisualSearchAcquisitionProvider`
+2. **Image Download**: The `image_url` from Google Lens results is downloaded
+3. **Content Validation**: PIL verifies downloaded content is a valid image
+4. **Local Storage**: Validated images are saved to `data/candidates/`
+5. **Manifest**: Results recorded in `data/debug/candidate_manifest.json`
 
-# Basic search
-results = search_image("data/input/query.jpg")
-print(f"Candidates: {len(results)}")
+### CAPTCHA Handling
 
-# With debug output
-output = run_search_and_save("data/input/query.jpg")
-```
-
-Or run directly:
-
-```bash
-python -m search.searcher
-```
-
-## Expected Output
-
-```
-[SEARCH START]
-Input: data/input/query.jpg
-Provider: microsoft-foundry
-
-[SEARCH COMPLETE]
-Candidates returned: <N>
-```
+If Google returns a CAPTCHA or upload form instead of results, the provider returns an empty list and logs `[VISUAL SEARCH BLOCKED]`. This is honest reporting — no fake results are generated.
 
 ## Test Input
 
-A test image is generated at `data/input/query.jpg` using Python PIL. It is a simple 224x224 RGB image.
+A test image is generated at `data/input/query.jpg` using Python PIL. It is a simple 224x224 RGB synthetic image.
 
 ## Current Limitations
 
-- MCR catalog returns repository listings, not image-specific search results
-- The search query is used as context; results are catalog-based
-- No authentication required for MCR public catalog
-- Rate limits may apply for large queries
-- Docker Hub backup provider requires the repository to exist publicly
+- Google may block requests with CAPTCHA (detected and reported honestly)
+- BeautifulSoup parsing uses selector-light approach; Google may change markup
+- No official Google API exists — this is community-built reverse image search
+- Rate limiting may apply for large queries
+- Visual search returns 0 results when Google blocks the request (expected behavior)
 
 ## Debug Output
 
 Search results are saved to `data/debug/search_results.json`.
 
-## Candidate Normalization & Retrieval
-
-### What Phase 3 Does
-
-Phase 3 transforms raw provider search results into standardized candidate records and attempts to retrieve candidate images locally.
-
-### Normalized Candidate Schema
-
-Each normalized candidate contains:
-- `candidate_id` — Deterministic ID (e.g., `cand_001`)
-- `provider` — Source provider name
-- `search_rank` — Original rank from the provider (preserved, not reordered)
-- `title` — Candidate title, or `null` if not provided
-- `source_url` — Source page URL, or `null` if not provided
-- `image_url` — Image URL, or `null` if invalid
-- `thumbnail_url` — Thumbnail URL, or `null` if not provided
-
-### Retrieval Behavior
-
-- Downloads images via HTTP with timeout (15s), size limit (50MB), and content validation
-- Validates downloaded content is actually an image using PIL
-- Saves validated images to `data/candidates/`
-- Continues on failure — a single inaccessible candidate does not stop the pipeline
-- Records retrieval status (`success` or `failed`) and error reason for each candidate
-
-### Local Output Directory
+## Pipeline Output
 
 ```
 data/
@@ -108,102 +122,20 @@ data/
     └── candidate_manifest.json
 ```
 
-### Manifest
+## Test Results
 
-The candidate manifest at `data/debug/candidate_manifest.json` connects every candidate to its retrieval status and local file path.
+- 44 unit tests, all passing
+- Visual search provider tests: 7 tests covering valid/invalid images, error handling
+- End-to-end pipeline verified with `data/input/query.jpg`
+- Google CAPTCHA blocking correctly reported as `[VISUAL SEARCH BLOCKED]`
 
-### How to Run
+## Security Safeguards
 
-```python
-from search.pipeline import run_pipeline
-run_pipeline()
-```
-
-Or directly:
-```bash
-python -m search.pipeline
-```
-
-### How Failures Are Represented
-
-- `retrieval_status: "success"` with `local_path` set
-- `retrieval_status: "failed"` with `error` describing the reason (e.g., `HTTP 403`, `downloaded content is not a valid image`)
-- `local_path: null` for failed retrievals
-
-### Current Limitations
-
-- MCR catalog URLs return HTML pages, not direct image blobs — retrieval fails for all MCR candidates
-- The `image_url` from MCR is a catalog page URL, not a downloadable image URL
-- No image thumbnails are available from the current provider
-- Candidate retrieval does not establish identity — downloading a candidate image does not mean it is the person being searched for
-
-### Security Safeguards
-
-- Request timeouts enforced
+- Request timeouts enforced (20s for visual search, 15s for acquisition)
 - Response size limited to 50MB
 - Content-type validation
 - Image content validation via PIL
 - Safe deterministic filenames only
 - No shell commands constructed from URLs
 - No credentials logged
-
-## Candidate Image Acquisition
-
-### Why Phase 3 Retrieval Failed
-
-Phase 3 attempted to download candidate images from MCR catalog URLs. All 20 candidates failed because MCR catalog URLs return HTML repository pages, not direct image blobs. The MCR registry API returns container image layers (`application/octet-stream`, 543MB+), which are not visual candidate images.
-
-### Difference Between Discovery and Acquisition
-
-- **Discovery**: Finding candidate metadata (repository names, tags) via registry catalog APIs
-- **Acquisition**: Obtaining actual visual image bytes (photographs) from discovered candidates
-
-These are distinct operations requiring different mechanisms.
-
-### Acquisition Providers Tested
-
-1. **MCR Registry API** (`https://mcr.microsoft.com/v2/{repo}/blobs/{digest}`)
-   - Manifest access: ✅ Works (returns container image manifests)
-   - Blob access: ✅ Works (returns `application/octet-stream`)
-   - Visual image: ❌ Blobs are container image layers, not photographs
-   - Blob sizes: 32 bytes to 543MB — all container artifacts
-
-2. **Docker Hub Registry API** (`https://registry-1.docker.io/v2/{repo}/manifests/latest`)
-   - Access: ❌ Requires authentication (HTTP 401)
-   - Even with auth, would return container image layers
-
-### Acquisition Architecture
-
-The acquisition layer is implemented as a separate abstraction:
-- `search/acquisition/base.py` — `ImageAcquisitionProvider` abstract base, `AcquisitionManager`
-- `search/acquisition/mcr.py` — `MCRAcquisitionProvider` — uses MCR registry v2 API to attempt blob download
-- `search/acquisition/dockerhub.py` — `DockerHubAcquisitionProvider` — attempts Docker Hub registry access
-- `search/acquisition/runner.py` — Pipeline runner for acquisition
-
-The architecture separates:
-1. **Discovery Provider** → candidate metadata
-2. **Acquisition Provider** → candidate image bytes
-
-### Output Files
-
-- `data/debug/candidate_manifest.json` — Updated with acquisition results
-- Each candidate includes `acquisition_status`, `error`, `provider`, `file_size`, `content_type`
-
-### Known Limitations
-
-- MCR only exposes container image artifacts, not visual candidate photographs
-- Docker Hub requires authentication and also returns container artifacts
-- No legitimate acquisition path currently produces visual candidate images
-- The POC status is FAIL: no mechanism produces actual candidate photographs
-- Acquisition does not establish identity — no candidate image represents a person
-
-### Security Safeguards
-
-- Request timeout (15s)
-- Response size limit (50MB)
-- Content-type validation
-- Image content validation via PIL
-- Safe deterministic filenames
-- No shell commands from URLs
-- No credentials logged
-- No arbitrary redirect following
+- File handles properly closed using context managers

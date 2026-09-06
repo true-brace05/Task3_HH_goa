@@ -1,19 +1,17 @@
 import logging
-import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import requests
 
-from search.providers.primary import MicrosoftFoundryProvider
-from search.providers.backup import DockerHubProvider
+from search.visual.google_lens import GoogleLensProvider
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_PROVIDER = MicrosoftFoundryProvider()
-BACKUP_PROVIDER = DockerHubProvider()
+PRIMARY_PROVIDER = GoogleLensProvider()
+BACKUP_PROVIDER = None
 
 
 def _validate_image(image_path: str) -> Path:
@@ -53,20 +51,12 @@ def search_image(image_path: str) -> List[dict]:
     logger.info("Invoking PRIMARY provider: %s", PRIMARY_PROVIDER.name)
 
     try:
-        candidates = PRIMARY_PROVIDER.search(query=path.name)
+        candidates = PRIMARY_PROVIDER.search_by_image(str(path))
         logger.info("PRIMARY returned %d candidates", len(candidates))
     except Exception as e:
         logger.warning("PRIMARY provider failed: %s", e)
-        logger.info("Falling back to BACKUP provider: %s", BACKUP_PROVIDER.name)
-        try:
-            candidates = BACKUP_PROVIDER.search(query=path.name)
-            logger.info("BACKUP returned %d candidates", len(candidates))
-        except Exception as e2:
-            logger.error("[SEARCH FAILED] Backup provider also failed: %s", e2)
-            raise RuntimeError(
-                f"Both PRIMARY and BACKUP providers failed. "
-                f"Primary: {e}; Backup: {e2}"
-            )
+        logger.error("[SEARCH FAILED] Visual search provider failed: %s", e)
+        return []
 
     if not candidates:
         logger.info("[SEARCH COMPLETE] Candidates returned: 0")

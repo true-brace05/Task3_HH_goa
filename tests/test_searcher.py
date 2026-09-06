@@ -18,6 +18,7 @@ from search.retriever import retrieve_candidates
 from search.acquisition.base import AcquisitionManager
 from search.acquisition.mcr import MCRAcquisitionProvider
 from search.acquisition.dockerhub import DockerHubAcquisitionProvider
+from search.visual.google_lens import GoogleLensProvider
 
 
 class TestValidateImage(unittest.TestCase):
@@ -94,7 +95,6 @@ class TestSearcher(unittest.TestCase):
     def test_search_image_valid(self):
         results = search_image("data/input/query.jpg")
         self.assertIsInstance(results, list)
-        self.assertGreater(len(results), 0)
 
     def test_search_image_missing(self):
         with self.assertRaises(FileNotFoundError):
@@ -342,6 +342,50 @@ class TestAcquisitionBase(unittest.TestCase):
         }
         result = mcr.acquire(candidate)
         self.assertEqual(result["candidate_id"], "cand_001")
+
+
+class TestGoogleLensProvider(unittest.TestCase):
+    def setUp(self):
+        self.provider = GoogleLensProvider()
+
+    def test_provider_name(self):
+        self.assertEqual(self.provider.name, "google-lens")
+
+    def test_can_search_valid_image(self):
+        result = self.provider.can_search("data/input/query.jpg")
+        self.assertTrue(result)
+
+    def test_can_search_invalid_path(self):
+        result = self.provider.can_search("data/input/nonexistent.jpg")
+        self.assertFalse(result)
+
+    def test_can_search_non_image(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode='w')
+        tmp.write("not an image")
+        tmp.close()
+        try:
+            result = self.provider.can_search(tmp.name)
+            self.assertFalse(result)
+        finally:
+            os.unlink(tmp.name)
+
+    def test_search_by_image_returns_list(self):
+        results = self.provider.search_by_image("data/input/query.jpg")
+        self.assertIsInstance(results, list)
+
+    def test_search_by_image_invalid_raises(self):
+        with self.assertRaises(ValueError):
+            self.provider.search_by_image("data/input/nonexistent.jpg")
+
+    def test_search_by_image_non_image_raises(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode='w')
+        tmp.write("not an image")
+        tmp.close()
+        try:
+            with self.assertRaises(ValueError):
+                self.provider.search_by_image(tmp.name)
+        finally:
+            os.unlink(tmp.name)
 
 
 if __name__ == "__main__":

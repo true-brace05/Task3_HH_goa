@@ -150,8 +150,11 @@ def get_manifest(manifest_path: str = "data/debug/candidate_manifest.json") -> d
 
 
 def print_pipeline_summary(manifest: dict):
-    print(f"\n[SEARCH] Candidates discovered: {manifest['candidate_count']}")
-    print(f"[NORMALIZATION] Candidates normalized: {manifest['candidate_count']}")
-    print(f"[RETRIEVAL] Successfully retrieved: {manifest['retrieved_count']}")
-    print(f"[RETRIEVAL] Failed: {manifest['failed_count']}")
+    candidate_count = manifest.get('candidate_count', 0)
+    success_count = manifest.get('retrieved_count', manifest.get('acquired_count', 0))
+    fail_count = manifest.get('failed_count', 0)
+    print(f"\n[SEARCH] Candidates discovered: {candidate_count}")
+    print(f"[NORMALIZATION] Candidates normalized: {candidate_count}")
+    print(f"[ACQUISITION] Successfully acquired: {success_count}")
+    print(f"[ACQUISITION] Failed: {fail_count}")
     print(f"[MANIFEST] Saved: data/debug/candidate_manifest.json")

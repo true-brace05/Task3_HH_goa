@@ -61,7 +61,7 @@ Phase 1 (Commit `06afd98`, `feature/search-provider-poc`): Selected Microsoft Fo
 ## Implementation
 
 1. **`search/__init__.py`** — Package initializer exporting `search_image`, providers.
-2. **`search/searcher.py`** — Main `search_image(image_path)` function with input validation, provider orchestration, fallback, and debug output.
+2. **`search/searcher.py`** — Main `search_image()` function with input validation, provider orchestration, fallback, and debug output.
 3. **`search/providers/__init__.py`** — Providers package initializer.
 4. **`search/providers/primary.py`** — `MicrosoftFoundryProvider` using MCR v2 catalog API for real results.
 5. **`search/providers/backup.py`** — `DockerHubProvider` using Docker Hub v2 repositories API for fallback.
@@ -413,16 +413,188 @@ Push: SUCCESS
 
 ---
 
+## Phase 5 — Visual Reverse Image Search POC
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/visual-search-poc
+
+## Objective
+
+Replace the container-registry acquisition approach with a genuine visual reverse-image-search mechanism using Google Lens.
+
+## Previous Phase
+
+Phase 4 — Candidate Image Acquisition POC
+
+Reference:
+- Branch: feature/candidate-acquisition
+- Commit: 7b3058631195cfd88a8384e5de4baac46d6365f1
+- Search candidates: 20 (all from MCR)
+- Acquired: 0/20 (all container artifacts)
+- Status: FAIL
+
+## Provider Selection
+
+**Primary Search**: `GoogleLensProvider` (`google-lens`)
+- Based on `ramonclaudio/Google-Reverse-Image-Search` (MIT license)
+- Uses Google's undocumented `searchbyimage/upload` endpoint
+- Posts local image directly via `requests` + `BeautifulSoup`
+- No official Google API — community-built reverse image search
+
+**Primary Acquisition**: `VisualSearchAcquisitionProvider` (`visual-search-acquisition`)
+- Downloads actual web images from Google Lens results
+- Validates downloaded content is a valid image using PIL
+- Saves to `data/candidates/`
+
+## Research
+
+Evaluated two candidate open-source implementations:
+
+1. **`ramonclaudio/Google-Reverse-Image-Search`** (MIT)
+   - Simple `requests` + `BeautifulSoup` wrapper
+   - Takes `image_url` parameter
+   - Uses Google `searchbyimage` endpoint
+   - **Selected**: Simpler architecture, no browser dependency
+
+2. **`darcodev/chrome-lens-search`** (MIT)
+   - More sophisticated: Selenium/Chromium for initial session, then plain HTTP
+   - Requires browser automation (Selenium + undetected-chromedriver)
+   - **Rejected**: No Chrome/Chromium in environment, heavy dependency
+
+## Implementation
+
+### New Files Created
+
+1. **`search/visual/__init__.py`** — Package initializer exporting `VisualSearchProvider`, `GoogleLensProvider`
+2. **`search/visual/base.py`** — `VisualSearchProvider` abstract base class with `search_by_image(image_path) -> list` and `can_search(image_path) -> bool`
+3. **`search/visual/google_lens.py`** — `GoogleLensProvider` implementation:
+   - `search_by_image(image_path)` — POSTs local image to Google's upload endpoint, parses HTML results
+   - `can_search(image_path)` — Validates image file exists and is valid
+   - Returns list of dicts with `source_url`, `image_url`, `title`, `provider`
+   - Handles CAPTCHA by returning empty list and logging `[VISUAL SEARCH BLOCKED]`
+4. **`search/visual/runner.py`** — Visual search pipeline runner
+5. **`search/acquisition/visual.py`** — `VisualSearchAcquisitionProvider`:
+   - Downloads web images from Google Lens results
+   - Validates content is valid image using PIL
+   - Saves to `data/candidates/`
+6. **`tests/test_searcher.py`** — Added 7 new tests for `GoogleLensProvider`
+7. **`requirements.txt`** — Added `beautifulsoup4>=4.12.0`
+
+### Modified Files
+
+1. **`search/searcher.py`** — Updated to use `GoogleLensProvider` as PRIMARY search mechanism (replaced MCR/DockerHub)
+2. **`search/acquisition/runner.py`** — Updated to use `VisualSearchAcquisitionProvider` as PRIMARY acquisition
+3. **`search/acquisition/__init__.py`** — Added `VisualSearchAcquisitionProvider` export
+4. **`search/__init__.py`** — Added `GoogleLensProvider`, `VisualSearchAcquisitionProvider` exports
+5. **`search/retriever.py`** — Updated `print_pipeline_summary` to handle both `retrieved_count` and `acquired_count`
+6. **`README.md`** — Updated with Phase 5 documentation
+7. **`docs/search_decision.md`** — Updated with Phase 5 decision documentation
+
+### Preserved Files
+
+- **`search/providers/primary.py`** — `MicrosoftFoundryProvider` (historical reference)
+- **`search/providers/backup.py`** — `DockerHubProvider` (historical reference)
+- **`search/acquisition/mcr.py`** — `MCRAcquisitionProvider` (historical reference)
+- **`search/acquisition/dockerhub.py`** — `DockerHubAcquisitionProvider` (historical reference)
+- **`search/visual/base.py`** — `VisualSearchProvider` abstract class
+- **`search/providers/__init__.py`** — Providers package
+- **`search/normalizer.py`** — Unchanged
+- **`search/acquisition/base.py`** — Unchanged
+- **`search/pipeline.py`** — Unchanged
+- **`data/input/query.jpg`** — Test image
+
+## How It Works
+
+### Visual Search Flow
+
+1. Local image (`data/input/query.jpg`) is POSTed to `https://www.google.com/searchbyimage/upload`
+2. Response HTML is parsed with BeautifulSoup to extract image result tiles
+3. Links are extracted from result tiles (filtering `/url?q=` patterns)
+4. Duplicate URLs are removed
+5. Results returned as list of dicts with `source_url`, `image_url`, `title`, `provider`
+
+### CAPTCHA Handling
+
+If Google returns a CAPTCHA or upload form instead of results, the provider returns an empty list and logs `[VISUAL SEARCH BLOCKED]`. This is honest reporting — no fake results are generated.
+
+## Test Results
+
+- **44 tests, all passing** (37 existing + 7 new visual search tests)
+- Visual search provider tests: 7 tests covering valid/invalid images, error handling, blocked requests
+- End-to-end pipeline verified with `data/input/query.jpg`
+- Google CAPTCHA blocking correctly reported as `[VISUAL SEARCH BLOCKED]`
+- Pipeline handles 0 results correctly (no crash, proper manifest)
+
+### New Test Classes
+
+```python
+class TestGoogleLensProvider(unittest.TestCase):
+    def test_provider_name(self)
+    def test_can_search_valid_image(self)
+    def test_can_search_invalid_path(self)
+    def test_can_search_non_image(self)
+    def test_search_by_image_returns_list(self)
+    def test_search_by_image_invalid_raises(self)
+    def test_search_by_image_non_image_raises(self)
+```
+
+## Security
+
+Safeguards implemented:
+- Request timeout (20s for visual search, 15s for acquisition)
+- Response size limited to 50MB
+- Content-type validation
+- Image content validation via PIL
+- Safe deterministic filenames only
+- No shell commands constructed from URLs
+- No credentials logged
+- File handles properly closed using context managers
+- No arbitrary redirect following
+
+## Status
+
+**BLOCKED** — Google returns CAPTCHA when attempting visual search. Provider correctly reports `[VISUAL SEARCH BLOCKED]` rather than fabricating results. The architecture is sound and ready to produce real candidates if CAPTCHA can be bypassed or Google's endpoint behavior changes.
+
+## Known Limitations
+
+- Google's `searchbyimage` endpoint may block automated requests with CAPTCHA
+- BeautifulSoup parsing uses selector-light approach; Google may change markup without notice
+- No official Google API exists — this is an unofficial community-built client
+- Rate limiting may apply for large queries
+- When blocked, the provider returns empty list (no fallback to MCR/DockerHub)
+- MCR and DockerHub are preserved as historical references but not used as fallbacks
+
+## Next Step
+
+**VISUAL SEARCH BLOCKED** by Google's CAPTCHA protection. The architecture is ready — if CAPTCHA can be bypassed or Google's endpoint behavior changes, the visual search pipeline will produce real candidates.
+
+## Git
+
+Commit: TBD (to be committed)
+Branch: `feature/visual-search-poc`
+
+---
+
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total Commits | 4 |
-| Branch | `feature/candidate-acquisition` |
+| Total Commits | 5 (including Phase 5) |
+| Branch | `feature/visual-search-poc` |
 | Phase 1 Commit | `06afd98` |
 | Phase 2 Commit | `90a6aeac3cae97f54851a9d983ff313e4dbbd15` |
 | Phase 3 Commit | `df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10` |
 | Phase 4 Commit | `7b3058631195cfd88a8384e5de4baac46d6365f1` |
+| Phase 5 Branch | `feature/visual-search-poc` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
 
