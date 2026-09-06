@@ -5,12 +5,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from search.searcher import search_image, _validate_image
 from search.providers.primary import MicrosoftFoundryProvider
 from search.providers.backup import DockerHubProvider
+from search.normalizer import normalize_results
+from search.retriever import retrieve_candidates
 
 
 class TestValidateImage(unittest.TestCase):
@@ -102,6 +105,149 @@ class TestSearcher(unittest.TestCase):
                 search_image(tmp.name)
         finally:
             os.unlink(tmp.name)
+
+
+class TestNormalizer(unittest.TestCase):
+    def test_normal_result(self):
+        raw = [{
+            "candidate_id": "cand_000",
+            "source_url": "https://example.com/src",
+            "image_url": "https://example.com/img.jpg",
+            "thumbnail_url": "https://example.com/thumb.jpg",
+            "title": "Test Image",
+            "search_rank": 1,
+            "provider": "microsoft-foundry",
+        }]
+        normalized = normalize_results(raw)
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["candidate_id"], "cand_001")
+        self.assertEqual(normalized[0]["title"], "Test Image")
+        self.assertEqual(normalized[0]["search_rank"], 1)
+        self.assertEqual(normalized[0]["provider"], "microsoft-foundry")
+
+    def test_missing_optional_fields(self):
+        raw = [{
+            "image_url": "https://example.com/img.jpg",
+            "provider": "microsoft-foundry",
+            "search_rank": 1,
+        }]
+        normalized = normalize_results(raw)
+        self.assertEqual(len(normalized), 1)
+        self.assertIsNone(normalized[0]["title"])
+        self.assertIsNone(normalized[0]["thumbnail_url"])
+        self.assertIsNone(normalized[0]["source_url"])
+
+    def test_invalid_url(self):
+        raw = [{
+            "image_url": "not-a-url",
+            "provider": "microsoft-foundry",
+            "search_rank": 1,
+        }]
+        normalized = normalize_results(raw)
+        self.assertEqual(len(normalized), 0)
+
+    def test_duplicate_handling(self):
+        raw = [
+            {"image_url": "https://example.com/img.jpg", "provider": "microsoft-foundry", "search_rank": 1},
+            {"image_url": "https://example.com/img.jpg", "provider": "microsoft-foundry", "search_rank": 2},
+        ]
+        normalized = normalize_results(raw)
+        self.assertEqual(len(normalized), 1)
+
+    def test_empty_results(self):
+        normalized = normalize_results([])
+        self.assertEqual(normalized, [])
+
+    def test_malformed_result(self):
+        raw = ["not a dict", {"image_url": "https://example.com/img.jpg", "provider": "microsoft-foundry", "search_rank": 1}]
+        normalized = normalize_results(raw)
+        self.assertEqual(len(normalized), 1)
+
+    def test_rank_preserved(self):
+        raw = [
+            {"image_url": "https://example.com/a.jpg", "provider": "microsoft-foundry", "search_rank": 5},
+            {"image_url": "https://example.com/b.jpg", "provider": "microsoft-foundry", "search_rank": 10},
+        ]
+        normalized = normalize_results(raw)
+        self.assertEqual(normalized[0]["search_rank"], 5)
+        self.assertEqual(normalized[1]["search_rank"], 10)
+
+    def test_deterministic_ids(self):
+        raw = [
+            {"image_url": "https://example.com/a.jpg", "provider": "microsoft-foundry", "search_rank": 1},
+            {"image_url": "https://example.com/b.jpg", "provider": "microsoft-foundry", "search_rank": 2},
+        ]
+        normalized = normalize_results(raw)
+        self.assertEqual(normalized[0]["candidate_id"], "cand_001")
+        self.assertEqual(normalized[1]["candidate_id"], "cand_002")
+
+
+import requests.exceptions
+
+class TestRetriever(unittest.TestCase):
+    def test_successful_retrieval(self):
+        candidate = {
+            "candidate_id": "cand_001",
+            "image_url": "https://example.com/img.jpg",
+            "search_rank": 1,
+        }
+        with patch("search.retriever.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.content = b"fake image data"
+            mock_response.headers = {"content-type": "image/jpeg"}
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+            with patch("search.retriever.Image.open") as mock_img:
+                mock_img.return_value.verify = MagicMock()
+                mock_img.return_value.format = "JPEG"
+                result = retrieve_candidates([candidate], output_dir="data/debug/test_candidates")
+                self.assertEqual(result["candidate_count"], 1)
+                self.assertEqual(result["candidates"][0]["retrieval_status"], "success")
+
+    def test_http_failure(self):
+        candidate = {
+            "candidate_id": "cand_001",
+            "image_url": "https://example.com/forbidden.jpg",
+            "search_rank": 1,
+        }
+        with patch("search.retriever.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=MagicMock(status_code=403))
+            mock_get.return_value = mock_response
+            result = retrieve_candidates([candidate], output_dir="data/debug/test_candidates2")
+            self.assertEqual(result["candidates"][0]["retrieval_status"], "failed")
+
+    def test_missing_image_url(self):
+        candidate = {
+            "candidate_id": "cand_001",
+            "search_rank": 1,
+        }
+        result = retrieve_candidates([candidate], output_dir="data/debug/test_candidates3")
+        self.assertEqual(result["candidates"][0]["retrieval_status"], "failed")
+        self.assertEqual(result["candidates"][0]["error"], "missing image URL")
+
+    def test_empty_candidates(self):
+        result = retrieve_candidates([], output_dir="data/debug/test_candidates4")
+        self.assertEqual(result["candidate_count"], 0)
+
+    def test_multiple_candidates_one_fails(self):
+        candidates = [
+            {"candidate_id": "cand_001", "image_url": "https://example.com/img1.jpg", "search_rank": 1},
+            {"candidate_id": "cand_002", "image_url": "", "search_rank": 2},
+        ]
+        with patch("search.retriever.requests.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.content = b"fake image data"
+            mock_response.headers = {"content-type": "image/jpeg"}
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+            with patch("search.retriever.Image.open") as mock_img:
+                mock_img.return_value.verify = MagicMock()
+                mock_img.return_value.format = "JPEG"
+                result = retrieve_candidates(candidates, output_dir="data/debug/test_candidates5")
+                self.assertEqual(result["candidate_count"], 2)
+                self.assertEqual(result["retrieved_count"] + result["failed_count"], 2)
+
 
 
 if __name__ == "__main__":

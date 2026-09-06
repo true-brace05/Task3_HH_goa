@@ -12,3 +12,5 @@ build/
 *~
 data/input/query.jpg
 search_results.json
+data/candidates/
+data/debug/candidate_manifest.json
