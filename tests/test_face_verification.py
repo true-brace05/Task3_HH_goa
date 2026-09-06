@@ -210,31 +210,37 @@ class TestFaceVerificationContract(unittest.TestCase):
             anchor_dir = Path(tmpdir) / "blockchain"
             evidence_dir.mkdir()
             anchor_dir.mkdir()
-            # Mock verification adapter to return deterministic match
-            mock_ver = VerificationData(method="stub-hash-v1", score="0.900000", decision="match", timestamp="2026-09-06T12:00:00+00:00", query_face_detected=True, candidate_face_detected=True)
-            with patch("verification.adapter.verify_candidate", return_value=mock_ver):
-                with patch("search.acquisition.runner.run_pipeline") as mock_run:
-                    mock_run.return_value = dict(FIXTURE_MANIFEST)
-                    from pipeline import run_full_pipeline
-                    result = run_full_pipeline(
-                        image_path="data/input/mock.jpg",
-                        register_on_chain=False,
-                        evidence_output_dir=str(evidence_dir),
-                        anchor_dir=str(anchor_dir),
-                    )
-                    self.assertIsNotNone(result["envelope"])
-                    self.assertIsNone(result["anchor"])
-                    # verification results present
-                    self.assertIn("verification_results", result)
-                    # offline verifier valid
-                    evidence_path = evidence_dir / f"evidence_{result['envelope'].pipeline_run_id}.json"
-                    ver = verify_offline(evidence_path)
-                    self.assertTrue(ver["valid"])
-                    self.assertIsNone(ver["on_chain"])
+            # Mock verification adapter (new real adapter) to return deterministic match
+            # Pipeline now reuses query embedding: patch get_reference_embedding + verify_candidate_with_embedding
+            import numpy as np
+            mock_ver = VerificationData(method=METHOD, score="0.900000", decision="match", timestamp="2026-09-06T12:00:00+00:00", query_face_detected=True, candidate_face_detected=True)
+            mock_embedding = np.zeros(512, dtype=np.float32)
+            with patch("verification.adapter.get_reference_embedding", return_value=(mock_embedding, {"det_score": 0.99})):
+                with patch("verification.adapter.verify_candidate_with_embedding", return_value=mock_ver):
+                    # Keep backward compat: also patch old entry point in case of fallback
+                    with patch("verification.adapter.verify_candidate", return_value=mock_ver):
+                        with patch("search.acquisition.runner.run_pipeline") as mock_run:
+                            mock_run.return_value = dict(FIXTURE_MANIFEST)
+                            from pipeline import run_full_pipeline
+                            result = run_full_pipeline(
+                                image_path="data/input/mock.jpg",
+                                register_on_chain=False,
+                                evidence_output_dir=str(evidence_dir),
+                                anchor_dir=str(anchor_dir),
+                            )
+                            self.assertIsNotNone(result["envelope"])
+                            self.assertIsNone(result["anchor"])
+                            # verification results present
+                            self.assertIn("verification_results", result)
+                            # offline verifier valid
+                            evidence_path = evidence_dir / f"evidence_{result['envelope'].pipeline_run_id}.json"
+                            ver = verify_offline(evidence_path)
+                            self.assertTrue(ver["valid"])
+                            self.assertIsNone(ver["on_chain"])
 
     def test_one_failed_verification_does_not_crash(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create real temp images for stub to handle
+            # Create real temp images for adapter to handle (content doesn't matter, mocked)
             q = Path(tmpdir) / "query.jpg"
             from PIL import Image
             Image.new("RGB", (10, 10), color="red").save(q)
@@ -253,20 +259,31 @@ class TestFaceVerificationContract(unittest.TestCase):
                     {"candidate_id": "cand_002", "status": "success", "provider": "visual-search-acquisition", "local_path": str(c2_missing), "content_sha256": "b"*64, "source_url": "https://example.com/p2", "image_url": "https://example.com/img2.jpg", "thumbnail_url": None, "title": None, "search_rank": 2, "discovery_provider": "yandex-visual-search"},
                 ],
             }
-            with patch("search.acquisition.runner.run_pipeline", return_value=manifest):
-                from pipeline import run_full_pipeline
-                result = run_full_pipeline(
-                    image_path=str(q),
-                    register_on_chain=False,
-                    evidence_output_dir=str(Path(tmpdir) / "ev"),
-                    anchor_dir=str(Path(tmpdir) / "bl"),
-                )
-                # Should have 2 candidates, one with error decision
-                self.assertEqual(len(result["envelope"].candidates), 2)
-                decisions = [c.verification.decision for c in result["envelope"].candidates]
-                self.assertIn("error", decisions)
-                # Pipeline did not crash, evidence valid
-                self.assertIsNotNone(result["envelope"].evidence_hash)
+            # Mock face embedding to avoid requiring real model / face in dummy images
+            import numpy as np
+            mock_embedding = np.zeros(512, dtype=np.float32)
+            mock_success = VerificationData(method=METHOD, score="0.750000", decision="match", timestamp="2026-09-06T12:00:00+00:00", query_face_detected=True, candidate_face_detected=True)
+            def mock_verify_with_emb(ref_emb, cand_path, **kw):
+                # cand_path missing -> error (as real adapter would)
+                if not Path(cand_path).exists():
+                    return VerificationData(method=METHOD, score=None, decision="error", timestamp="2026-09-06T12:00:00+00:00", query_face_detected=True, candidate_face_detected=None, error="candidate image not found")
+                return mock_success
+            with patch("verification.adapter.get_reference_embedding", return_value=(mock_embedding, {"det_score": 0.99})):
+                with patch("verification.adapter.verify_candidate_with_embedding", side_effect=mock_verify_with_emb):
+                    with patch("search.acquisition.runner.run_pipeline", return_value=manifest):
+                        from pipeline import run_full_pipeline
+                        result = run_full_pipeline(
+                            image_path=str(q),
+                            register_on_chain=False,
+                            evidence_output_dir=str(Path(tmpdir) / "ev"),
+                            anchor_dir=str(Path(tmpdir) / "bl"),
+                        )
+                        # Should have 2 candidates, one with error decision
+                        self.assertEqual(len(result["envelope"].candidates), 2)
+                        decisions = [c.verification.decision for c in result["envelope"].candidates]
+                        self.assertIn("error", decisions)
+                        # Pipeline did not crash, evidence valid
+                        self.assertIsNotNone(result["envelope"].evidence_hash)
 
 
 if __name__ == "__main__":

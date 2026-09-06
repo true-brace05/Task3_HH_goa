@@ -1,8 +1,7 @@
 """Face verification adapter package.
 
-Member 1 implementation is currently a stub (no real model committed).
-This adapter provides a stable deterministic contract for pipeline integration
-and can be replaced with a real model without changing evidence hashing.
+Member 1 real implementation (InsightFace buffalo_l) via face/ module.
+Thin adapter converts face results to VerificationData contract.
 """
 
 from verification.adapter import verify_candidate, verify_candidates, format_score

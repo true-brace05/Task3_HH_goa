@@ -183,7 +183,8 @@ class Web3BlockchainClient(BlockchainClient):
                 }
             )
             signed = self.account.sign_transaction(tx)
-            tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+            raw_tx = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
+            tx_hash = self.w3.eth.send_raw_transaction(raw_tx)
             receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
             return {
                 "evidence_hash": h,

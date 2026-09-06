@@ -60,11 +60,18 @@ def _run_face_verification(manifest: dict, query_image: str) -> dict:
     """Run face verification for acquired candidates, return enriched manifest.
 
     One failed candidate verification must NOT crash pipeline.
+    Generates query face embedding ONCE then reuses for all candidates
+    (requirement: do not recompute query embedding per candidate).
     Returns new manifest with verification results attached to each candidate.
     Also returns verification_results mapping for pipeline return.
     """
     try:
-        from verification.adapter import verify_candidate
+        from verification.adapter import (
+            get_reference_embedding,
+            verify_candidate_with_embedding,
+            METHOD as VERIF_METHOD,
+        )
+        from verification.adapter import verify_candidate as _verify_single  # fallback
     except ImportError:
         # No verification module — return manifest unchanged with pending verification
         return manifest, {}
@@ -73,6 +80,28 @@ def _run_face_verification(manifest: dict, query_image: str) -> dict:
     candidates = list(manifest.get("candidates", []))
     verification_results = {}
     new_candidates = []
+
+    # Collect candidates that need verification (to avoid computing embedding if none)
+    needs_verification = [
+        c for c in candidates if (c.get("status") or c.get("retrieval_status")) == "success" and c.get("local_path")
+    ]
+
+    reference_embedding = None
+    query_error = None
+    query_face_detected: Optional[bool] = None
+
+    if needs_verification:
+        try:
+            reference_embedding, _face_info = get_reference_embedding(query_image)
+            query_face_detected = True
+        except Exception as e:
+            query_error = str(e)
+            # Determine if query had no face vs multiple vs missing
+            msg = str(e).lower()
+            is_no_face = "no face" in msg or "no face detected" in msg
+            query_face_detected = False if is_no_face else None
+            reference_embedding = None
+
     for cand in candidates:
         status = cand.get("status") or cand.get("retrieval_status")
         local_path = cand.get("local_path")
@@ -94,21 +123,44 @@ def _run_face_verification(manifest: dict, query_image: str) -> dict:
                 }
             new_candidates.append(cand)
             continue
+
+        # If query embedding failed, produce error/inconclusive for all remaining
+        if reference_embedding is None:
+            from evidence.schema import VerificationData
+
+            is_no_face = query_face_detected is False
+            decision = "inconclusive" if is_no_face else "error"
+            err_result = VerificationData(
+                method=VERIF_METHOD,
+                score=None,
+                decision=decision,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                query_face_detected=query_face_detected,
+                candidate_face_detected=None,
+                error=query_error or "query face embedding failed",
+            )
+            verification_results[cid] = err_result
+            cand = dict(cand)
+            cand["verification"] = err_result.to_dict()
+            new_candidates.append(cand)
+            continue
+
         try:
-            result = verify_candidate(query_image, local_path)
+            result = verify_candidate_with_embedding(reference_embedding, local_path)
             verification_results[cid] = result
             cand = dict(cand)
             cand["verification"] = result.to_dict()
         except Exception as e:
             # Unexpected error → structured error result, continue
             from evidence.schema import VerificationData
-            from datetime import timezone
 
             err_result = VerificationData(
-                method="stub-hash-v1",
+                method=VERIF_METHOD,
                 score=None,
                 decision="error",
                 timestamp=datetime.now(timezone.utc).isoformat(),
+                query_face_detected=query_face_detected,
+                candidate_face_detected=None,
                 error=str(e),
             )
             verification_results[cid] = err_result
