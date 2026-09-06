@@ -10,3 +10,5 @@ build/
 *.swp
 *.swo
 *~
+data/input/query.jpg
+search_results.json

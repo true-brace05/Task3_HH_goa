@@ -1,46 +1,69 @@
-# Runtime Image Search Provider
+# Runtime Discovery POC
 
-A runtime image search provider for Microsoft Foundry that enables searching and selecting container images for AI agent deployments.
+## Selected Primary Provider
 
-## Overview
+**Microsoft Foundry (MCR)** — `mcr.microsoft.com`
 
-This module provides a pluggable search provider system for discovering and selecting runtime container images across multiple registries including Docker Hub, Azure Container Registry, and Microsoft Foundry.
+The Microsoft Container Registry is used as the primary runtime image search provider. It provides real container image catalog data through the MCR v2 registry API.
 
-## Features
+## Dependencies
 
-- **Multi-registry search**: Search across Docker Hub, Azure CR, Microsoft Foundry, and MCR
-- **Pluggable providers**: Register custom search providers
-- **Filtering**: Filter by framework, size, registry, and status
-- **Provider selection**: Automatically select the best provider based on query context
-
-## Quick Start
-
-```python
-from search_provider import create_default_provider
-
-# Create provider with all registered backends
-provider = create_default_provider()
-
-# Search for runtime images
-result = provider.search("openai runtime", frameworks=["openai"])
-print(f"Found {result.total_count} images")
-
-# Get a specific image
-image = provider.get_image("openai/runtime", "latest")
-print(f"Image: {image.full_name}")
+```bash
+pip install -r requirements.txt
 ```
-
-## Provider Selection
-
-The `get_best_provider` function selects the optimal provider based on query context:
-- Queries containing "openai" or "foundry" → Microsoft Foundry
-- Queries containing "azure" → Azure Container Registry
-- Default → Docker Hub
 
 ## Configuration
 
-See `config.json` for provider priorities, registry URLs, and default search criteria.
+Copy `.env.example` to `.env` and adjust as needed:
 
-## License
+```bash
+cp .env.example .env
+```
 
-MIT
+No API keys are required for the MCR catalog endpoint.
+
+## Running the POC
+
+```python
+from search.searcher import search_image, run_search_and_save
+
+# Basic search
+results = search_image("data/input/query.jpg")
+print(f"Candidates: {len(results)}")
+
+# With debug output
+output = run_search_and_save("data/input/query.jpg")
+```
+
+Or run directly:
+
+```bash
+python -m search.searcher
+```
+
+## Expected Output
+
+```
+[SEARCH START]
+Input: data/input/query.jpg
+Provider: microsoft-foundry
+
+[SEARCH COMPLETE]
+Candidates returned: <N>
+```
+
+## Test Input
+
+A test image is generated at `data/input/query.jpg` using Python PIL. It is a simple 224x224 RGB image.
+
+## Current Limitations
+
+- MCR catalog returns repository listings, not image-specific search results
+- The search query is used as context; results are catalog-based
+- No authentication required for MCR public catalog
+- Rate limits may apply for large queries
+- Docker Hub backup provider requires the repository to exist publicly
+
+## Debug Output
+
+Search results are saved to `data/debug/search_results.json`.

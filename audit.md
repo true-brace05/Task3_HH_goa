@@ -31,14 +31,122 @@
 
 ---
 
+## Phase 2 — Runtime Search POC
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/search-poc
+
+## Objective
+
+Prove local image → runtime search provider → real candidate results.
+
+## Previous Phase
+
+Phase 1 (Commit `06afd98`, `feature/search-provider-poc`): Selected Microsoft Foundry (MCR) as PRIMARY provider and Docker Hub as BACKUP provider.
+
+## Provider Used
+
+**PRIMARY**: Microsoft Foundry (MCR) — `https://mcr.microsoft.com/v2/_catalog`
+**BACKUP**: Docker Hub — `https://hub.docker.com/v2/repositories/{repo}/tags/`
+
+## Implementation
+
+1. **`search/__init__.py`** — Package initializer exporting `search_image`, providers.
+2. **`search/searcher.py`** — Main `search_image(image_path)` function with input validation, provider orchestration, fallback, and debug output.
+3. **`search/providers/__init__.py`** — Providers package initializer.
+4. **`search/providers/primary.py`** — `MicrosoftFoundryProvider` using MCR v2 catalog API for real results.
+5. **`search/providers/backup.py`** — `DockerHubProvider` using Docker Hub v2 repositories API for fallback.
+6. **`data/input/query.jpg`** — Test image (224x224 RGB synthetic image created with PIL).
+7. **`data/debug/search_results.json`** — Debug output with 20 real candidates from MCR.
+8. **`tests/test_searcher.py`** — Unit tests covering valid image, missing image, invalid path, non-image file, provider failure, empty results.
+9. **`requirements.txt`** — Dependencies: Pillow, requests.
+10. **`.env.example`** — Environment variable template.
+11. **`docs/search_decision.md`** — Provider selection documentation.
+12. **`README.md`** — Updated with Runtime Discovery POC section.
+
+## Test Input
+
+Test image: `data/input/query.jpg` — a 224x224 RGB synthetic image generated with Python PIL. No personal images used.
+
+## Result
+
+Candidates returned: 20
+
+## Sample Result Structure
+
+```json
+{
+  "candidate_id": "cand_000",
+  "source_url": "https://mcr.microsoft.com/samples/blockchain-ai/0xdeca10b-demo",
+  "image_url": "https://mcr.microsoft.com/samples/blockchain-ai/0xdeca10b-demo",
+  "thumbnail_url": null,
+  "title": "samples/blockchain-ai/0xdeca10b-demo",
+  "search_rank": 1,
+  "provider": "microsoft-foundry"
+}
+```
+
+Fields successfully obtained: `candidate_id`, `source_url`, `image_url`, `thumbnail_url`, `title`, `search_rank`, `provider`.
+
+## Errors / Limitations
+
+- MCR catalog returns repository listings, not query-specific image results. The query is used as context only.
+- Docker Hub API requires full `namespace/repo` format; partial queries may return empty results.
+- No authentication for MCR catalog; rate limits may apply.
+- The `query` parameter in MCR provider does not filter results; all catalog repos are returned.
+
+## Fallback
+
+Backup provider (Docker Hub) was not required. PRIMARY provider returned 20 results successfully.
+
+## Validation
+
+Commands used:
+```bash
+python -m unittest tests.test_searcher -v
+# Result: 13 tests ran, all OK
+```
+
+POC execution:
+```bash
+python -m search.searcher
+# Result: Candidates returned: 20
+```
+
+Debug output verified at `data/debug/search_results.json`.
+
+## Status
+
+PASS
+
+## Next Step
+
+Prepare for normalization + candidate retrieval.
+
+## Git
+
+Commit: `35dc89eeb6683bb3022f16138642d0852ab17f82`
+Push: SUCCESS
+
+---
+
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total Commits | 1 |
-| Branch | `feature/search-provider-poc` |
-| Total Files | 10 |
-| Total Lines Added | 505 |
+| Total Commits | 2 |
+| Branch | `feature/search-poc` |
+| Phase 1 Commit | `06afd98` |
+| Phase 2 Commit | `35dc89eeb6683bb3022f16138642d0852ab17f82` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
 
