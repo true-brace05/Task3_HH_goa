@@ -21,6 +21,9 @@ from utils.events import EventBus
 from blockchain.registration import register_evidence
 from blockchain.client import BlockchainClient, InMemoryBlockchainClient
 from verifier.independent import verify_offline
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_default_client() -> BlockchainClient:
@@ -34,26 +37,31 @@ def _get_default_client() -> BlockchainClient:
         if settings.chain_rpc_url and settings.private_key:
             # Try Web3 if configured and available
             try:
-                from blockchain.client import Web3BlockchainClient
-                # Need abi — load from compiled artifact if available, else None
-                abi = None
-                # Try to load compiled ABI from py-solc-x artifact not persisted
-                # For now, require caller to pass client if real chain needed
-                # Fall back to InMemory if abi missing
-                if abi is None:
-                    return InMemoryBlockchainClient(contract_address=settings.contract_address or "0x0000000000000000000000000000000000000000")
-                return Web3BlockchainClient(
-                    rpc_url=settings.chain_rpc_url,
-                    contract_address=settings.contract_address,
-                    private_key=settings.private_key,
-                    chain_id=settings.chain_id,
-                    abi=abi,
-                )
-            except Exception:
+                from blockchain.client import Web3BlockchainClient, load_artifact_abi
+                abi = load_artifact_abi()
+                # Only use Web3 if ABI is available and contract configured
+                if abi is not None and settings.contract_address:
+                    return Web3BlockchainClient(
+                        rpc_url=settings.chain_rpc_url,
+                        contract_address=settings.contract_address,
+                        private_key=settings.private_key,
+                        chain_id=settings.chain_id,
+                        abi=abi,
+                    )
+                # ABI missing or no contract -> fall back to InMemory (simulated)
+                logger.info("Web3 config present but ABI/contract missing — using InMemory anchor")
+                return InMemoryBlockchainClient(contract_address=settings.contract_address or "0x0000000000000000000000000000000000000000")
+            except Exception as e:
+                logger.warning("Web3 init failed, falling back to InMemory: %s", e)
                 pass
         return InMemoryBlockchainClient(contract_address=settings.contract_address or "0x0000000000000000000000000000000000000000")
     except Exception:
         return InMemoryBlockchainClient()
+
+def _is_inmemory_client(client: BlockchainClient) -> bool:
+    """Check if client is InMemory (simulated) vs Web3 (real chain)."""
+    from blockchain.client import InMemoryBlockchainClient as IMC
+    return isinstance(client, IMC)
 
 
 def _run_face_verification(manifest: dict, query_image: str) -> dict:
@@ -186,11 +194,18 @@ def run_full_pipeline(
     # Lazy import discovery to keep evidence/blockchain independent
     from search.acquisition.runner import run_pipeline as run_discovery_pipeline
 
-    # 1. Discovery/Acquisition → manifest
+    # 1. Discovery/Acquisition → manifest (single execution per pipeline run)
     manifest = run_discovery_pipeline(image_path)
+    # Auditable logging: discovery -> acquisition counts
+    logger.info("AUDIT DISCOVERED: %s", manifest.get("candidate_count", 0))
+    logger.info("AUDIT NORMALIZED: %s", manifest.get("candidate_count", 0))  # normalizer preserves count after dedupe; manifest reflects normalized
+    logger.info("AUDIT ACQUIRED: %s", manifest.get("acquired_count", 0))
+    logger.info("AUDIT FAILED: %s", manifest.get("failed_count", 0))
 
     # 2. Face verification (before hashing) — attach results to manifest
     enriched_manifest, verification_results = _run_face_verification(manifest, image_path)
+    logger.info("AUDIT PASSED TO VERIFICATION: %s", len(verification_results))
+    logger.info("AUDIT INCLUDED IN EVIDENCE: %s candidates (acquired %s)", len(enriched_manifest.get("candidates", [])), enriched_manifest.get("acquired_count", manifest.get("acquired_count", 0)))
 
     # 3. Construct pre-registration timeline (only these go into hashed envelope)
     #    Includes verification_complete before evidence_built
@@ -234,9 +249,15 @@ def run_full_pipeline(
             break
 
     anchor = None
+    anchor_is_inmemory = None
     if register_on_chain:
         client = blockchain_client or _get_default_client()
+        anchor_is_inmemory = _is_inmemory_client(client)
         anchor = register_evidence(envelope, client, anchor_dir=anchor_dir, write_anchor=True)
+        # Tag anchor with mode for UI distinction
+        anchor["_inmemory"] = anchor_is_inmemory
+        anchor["_mode"] = "IN-MEMORY ANCHOR" if anchor_is_inmemory else "ANCHORED ON BLOCKCHAIN"
+        logger.info("AUDIT ANCHOR MODE: %s contract=%s tx=%s", anchor["_mode"], anchor.get("contract_address"), anchor.get("transaction_hash"))
         # blockchain_registered stays OUTSIDE envelope, only in bus
         event_bus.emit_event(
             "blockchain_registered",
@@ -245,9 +266,14 @@ def run_full_pipeline(
                 "transaction_hash": anchor.get("transaction_hash"),
                 "block_number": anchor.get("block_number"),
                 "contract_address": anchor.get("contract_address"),
+                "mode": anchor["_mode"],
             },
             actor="blockchain",
         )
+    else:
+        logger.info("AUDIT ANCHOR MODE: NOT REGISTERED")
+
+    logger.info("AUDIT RETURNED TO UI: %s candidates in envelope", len(envelope.candidates))
 
     return {
         "manifest": manifest,
@@ -256,6 +282,7 @@ def run_full_pipeline(
         "envelope": envelope,
         "anchor": anchor,
         "event_bus": event_bus,
+        "anchor_is_inmemory": anchor_is_inmemory,
     }
 
 

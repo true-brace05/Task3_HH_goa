@@ -205,19 +205,25 @@ def build_evidence(
         try:
             cand = _map_candidate(raw)
         except ValueError as e:
-            # If image_url invalid, skip candidate (mirrors normalizer behavior)
-            # but preserve failed candidates that lack image_url? spec says failed preserved
-            # For deterministic behavior: skip unhashable invalid image_url
-            # Log skip via timeline detail rather than raising
-            # To avoid silent loss, we keep failed placeholder if status==failed
-            if raw.get("status") == "failed" or raw.get("retrieval_status") == "failed":
-                # create minimal failed candidate with placeholder image_url? Better skip
-                # but spec says preserve failed candidates for audit
-                # If image_url missing and failed, we still want to preserve
-                # So create a failed candidate with dummy image_url that will fail validation
-                # Instead, skip invalid and continue — the count will reflect skip
-                continue
-            raise
+            # Preserve failed candidates even if image_url invalid — use placeholder for audit
+            status = raw.get("status") or raw.get("retrieval_status") or raw.get("acquisition_status") or "failed"
+            if status == "failed":
+                # Inject placeholder image_url to keep failed candidate auditable
+                raw_fixed = dict(raw)
+                if not raw_fixed.get("image_url"):
+                    raw_fixed["image_url"] = "https://example.com/failed-placeholder.jpg"
+                # Ensure required fields
+                raw_fixed.setdefault("candidate_id", raw.get("candidate_id", f"cand_{len(candidates)+1:03d}"))
+                raw_fixed.setdefault("discovery_provider", raw.get("discovery_provider") or raw.get("provider") or "unknown")
+                raw_fixed.setdefault("search_rank", raw.get("search_rank", len(candidates)+1))
+                raw_fixed["status"] = "failed"
+                try:
+                    cand = _map_candidate(raw_fixed)
+                except ValueError:
+                    # If still invalid, skip (should not happen)
+                    continue
+            else:
+                raise
         candidates.append(cand)
 
     # Sort deterministically before hashing: search_rank asc, candidate_id tie breaker

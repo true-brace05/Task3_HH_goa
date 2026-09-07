@@ -118,29 +118,35 @@ def _settings_status():
                 face_detail = "InsightFace buffalo_l"
         except Exception as e:
             face_status = f"error: {e}"
-    # blockchain mode
+    # blockchain mode — distinct InMemory vs Web3, hide zero address
+    zero_addr = "0x0000000000000000000000000000000000000000"
+    # Contract is considered configured only if non-zero and non-empty
+    has_real_contract = bool(s.contract_address and s.contract_address.lower() != zero_addr.lower())
     if is_web3:
-        mode = "Web3"
-        # test connection lazily
+        # Check if ABI available for real Web3
         try:
-            from blockchain.client import Web3BlockchainClient
-            abi = None
-            try:
-                from blockchain.client import load_artifact_abi
-                abi = load_artifact_abi()
-            except Exception:
-                pass
-            # attempt quick connection check if contract configured
-            detail = f"RPC {s.chain_rpc_url} chainId {s.chain_id}"
-        except Exception as e:
-            detail = str(e)
-            mode = "Web3 (unreachable)"
+            from blockchain.client import load_artifact_abi
+            abi = load_artifact_abi()
+            has_abi = abi is not None
+        except Exception:
+            has_abi = False
+        if has_abi and has_real_contract:
+            mode = "Web3"
+            detail = f"RPC {s.chain_rpc_url} chainId {s.chain_id} — real blockchain anchor"
+        elif has_real_contract and not has_abi:
+            mode = "InMemory (Web3 config incomplete — ABI missing)"
+            detail = f"RPC {s.chain_rpc_url} configured but ABI missing — using InMemory anchor"
+        else:
+            mode = "InMemory (Web3 config incomplete)"
+            detail = f"RPC {s.chain_rpc_url} configured but contract not set — using InMemory anchor"
     else:
         mode = "InMemory"
-        detail = "No CHAIN_RPC_URL/PRIVATE_KEY — using deterministic InMemory client for demo"
+        detail = "No CHAIN_RPC_URL/PRIVATE_KEY — using deterministic InMemory client for demo (local simulated anchor only)"
+    # Never expose zero address as real contract
+    display_contract = s.contract_address if has_real_contract else ""
     return {
         "face": {"status": face_status, "detail": face_detail, "method": "insightface-buffalo_l"},
-        "blockchain": {"mode": mode, "detail": detail, "contract_address": s.contract_address or "", "rpc_url": s.chain_rpc_url or ""},
+        "blockchain": {"mode": mode, "detail": detail, "contract_address": display_contract, "rpc_url": s.chain_rpc_url or "", "has_real_contract": has_real_contract},
         "verifier": {"status": "ready", "detail": "verifier/independent.py"},
         "evidence_output_dir": s.evidence_output_dir,
     }
@@ -321,12 +327,48 @@ def api_investigate():
         # Preserve for debugging but not absolute path exposure: keep local_path as boolean flag
         candidates.append(sanitized)
 
-    # discovery info
+    # discovery info — auditable distinct counts
+    # Use manifest for discovery/acquisition, envelope for evidence, verification_results for verification
+    enriched = result.get("enriched_manifest", manifest)
+    # Auditable server-side logging
+    discovered = manifest.get("candidate_count", 0)
+    normalized = len(enriched.get("candidates", [])) if enriched else discovered  # after builder dedupe, but manifest already normalized
+    acquired = manifest.get("acquired_count", 0)
+    failed = manifest.get("failed_count", 0)
+    passed_to_verification = len(result.get("verification_results", {}))
+    included_in_evidence = len(envelope.candidates)
+    returned_to_ui = len(candidates)
+    app.logger.info("AUDIT FLOW query=%s DISCOVERED:%s NORMALIZED:%s ACQUIRED:%s FAILED:%s PASSED_TO_VERIFICATION:%s INCLUDED_IN_EVIDENCE:%s RETURNED_TO_UI:%s",
+                     save_name, discovered, normalized, acquired, failed, passed_to_verification, included_in_evidence, returned_to_ui)
     discovery = {
-        "candidate_count": manifest.get("candidate_count", 0),
-        "acquired_count": manifest.get("acquired_count", 0),
-        "failed_count": manifest.get("failed_count", 0),
+        "candidate_count": discovered,
+        "normalized_count": normalized,
+        "acquired_count": acquired,
+        "failed_count": failed,
+        "verified_count": passed_to_verification,
+        "evidence_candidate_count": included_in_evidence,
     }
+    # Determine anchor mode for UI (distinct InMemory vs Web3)
+    anchor_mode = None
+    anchor_contract_display = None
+    if anchor is not None:
+        is_inmemory = anchor.get("_inmemory", True) if isinstance(anchor, dict) else True
+        # Zero address should never be shown as real contract
+        raw_contract = anchor.get("contract_address", "") if isinstance(anchor, dict) else ""
+        if raw_contract == "0x0000000000000000000000000000000000000000" or not raw_contract:
+            anchor_contract_display = None  # hide zero address
+            anchor_mode = "IN-MEMORY ANCHOR"
+        else:
+            anchor_contract_display = raw_contract
+            anchor_mode = "ANCHORED ON BLOCKCHAIN" if not is_inmemory else "IN-MEMORY ANCHOR"
+        # Also check anchor's own mode tag from pipeline
+        if isinstance(anchor, dict) and anchor.get("_mode"):
+            anchor_mode = anchor["_mode"]
+            # Re-check zero address override
+            if raw_contract == "0x0000000000000000000000000000000000000000":
+                anchor_mode = "IN-MEMORY ANCHOR"
+    else:
+        anchor_mode = "NOT REGISTERED"
 
     # Sanitize envelope for frontend (strip local_path from candidates)
     envelope_dict = envelope.to_dict()
@@ -343,6 +385,8 @@ def api_investigate():
         "pipeline_run_id": envelope.pipeline_run_id,
         "evidence_path": f"data/evidence/evidence_{envelope.pipeline_run_id}.json",
         "anchor": anchor,
+        "anchor_mode": anchor_mode,
+        "anchor_contract_display": anchor_contract_display,
         "timeline": [t.to_dict() for t in envelope.timeline],
     })
 
@@ -410,23 +454,44 @@ def api_tamper_demo():
     path = body.get("path")
     field = body.get("field","score")  # score|decision|order|timeline
     if not path:
+        app.logger.warning("tamper_demo 400: missing path field=%s", field)
         return jsonify({"error":"path required"}), 400
+    # Diagnostic logging (sanitize absolute paths)
+    safe_path_log = Path(path).name if path else "none"
+    app.logger.info("tamper_demo request field=%s path_basename=%s", field, safe_path_log)
+    # Reject tampered file as source — must always start from original evidence
+    if "tampered_" in Path(path).name:
+        app.logger.warning("tamper_demo reject: attempted to tamper a tampered copy: %s", safe_path_log)
+        return jsonify({"error":"use original evidence file for tamper demo, not a previously tampered copy"}), 400
     p = Path(path)
     if not p.exists():
         p = Path("data/evidence") / Path(path).name
     if not p.exists():
+        # Also check UPLOAD_DIR for evidence that was uploaded for verify (not tampered)
+        alt = UPLOAD_DIR / Path(path).name
+        if alt.exists() and "tampered_" not in alt.name:
+            p = alt
+    if not p.exists():
+        app.logger.warning("tamper_demo 404: not found basename=%s", safe_path_log)
         return jsonify({"error":"not found"}), 404
-    data = json.loads(p.read_text())
+    try:
+        data = json.loads(p.read_text())
+    except Exception as e:
+        app.logger.warning("tamper_demo read failed basename=%s err=%s", safe_path_log, str(e)[:100])
+        return jsonify({"error":"cannot read evidence file"}), 400
     import copy
     tampered = copy.deepcopy(data)
     if field == "score":
         if tampered["candidates"]:
             tampered["candidates"][0]["verification"]["score"] = "0.000000"
     elif field == "decision":
+        # Flip decision to guarantee tamper detection (original may already be "match")
         if len(tampered["candidates"])>1:
-            tampered["candidates"][1]["verification"]["decision"] = "match"
+            cur = tampered["candidates"][1]["verification"].get("decision")
+            tampered["candidates"][1]["verification"]["decision"] = "no_match" if cur == "match" else "match"
         elif tampered["candidates"]:
-            tampered["candidates"][0]["verification"]["decision"] = "match"
+            cur = tampered["candidates"][0]["verification"].get("decision")
+            tampered["candidates"][0]["verification"]["decision"] = "no_match" if cur == "match" else "match"
     elif field == "order":
         tampered["candidates"] = list(reversed(tampered["candidates"]))
     elif field == "timeline":
@@ -435,12 +500,14 @@ def api_tamper_demo():
     else:
         tampered["evidence_hash"] = "0"*64
 
-    tmp = UPLOAD_DIR / f"tampered_{field}_{Path(path).name}"
+    # Each operation creates its own temporary tampered copy; original never modified
+    tmp = UPLOAD_DIR / f"tampered_{field}_{Path(p).name}"
     tmp.write_text(json.dumps(tampered, indent=2))
     res = verify_offline(tmp, anchor_dir="data/blockchain")
-    # Return safe relative path (basename) instead of absolute filesystem path
+    # Return safe relative path (basename) instead of absolute filesystem path, plus original path for stable UI
     safe_tampered = tmp.name
-    return jsonify({"tampered_path": safe_tampered, "field": field, "result": res, "original_hash": data.get("evidence_hash")})
+    app.logger.info("tamper_demo 200 field=%s original=%s tampered=%s valid=%s", field, safe_path_log, safe_tampered, res.get("valid"))
+    return jsonify({"tampered_path": safe_tampered, "field": field, "result": res, "original_hash": data.get("evidence_hash"), "original_path": str(p.name)})
 
 
 if __name__ == "__main__":

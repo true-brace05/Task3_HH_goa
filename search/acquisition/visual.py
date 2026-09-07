@@ -23,8 +23,12 @@ class VisualSearchAcquisitionProvider(ImageAcquisitionProvider):
     def can_acquire(self, candidate: dict) -> bool:
         if not candidate.get("image_url"):
             return False
+        # Permissive: any http/https image_url is acquirable; provider check is secondary
+        url = candidate.get("image_url", "")
+        if isinstance(url, str) and (url.startswith("http://") or url.startswith("https://")):
+            return True
         provider = candidate.get("provider", "")
-        return provider in ("google-lens", "yandex-visual-search", "visual-search") or "google" in candidate.get("image_url", "") or "yandex" in candidate.get("image_url", "")
+        return provider in ("google-lens", "yandex-visual-search", "visual-search")
 
     def acquire(self, candidate: dict) -> dict:
         candidate_id = candidate.get("candidate_id", "unknown")

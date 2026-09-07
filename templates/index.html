@@ -369,17 +369,21 @@ async function loadStatus(){
 async function loadStatusPage(){
   const j=await loadStatus();
   if(!j) return;
+  const zeroAddr = '0x0000000000000000000000000000000000000000';
+  const hasRealContract = j.blockchain.has_real_contract || (j.blockchain.contract_address && j.blockchain.contract_address.toLowerCase() !== zeroAddr);
+  const contractDisplay = hasRealContract ? j.blockchain.contract_address : '— (InMemory, no real contract)';
+  const contractCls = hasRealContract ? 'text-white' : 'text-zinc-500';
   $('#status-panel').innerHTML=`
     <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">FACE VERIFICATION</div><div class="mt-2 text-sm font-medium text-violet">${j.face.method}</div><div class="mono text-xs text-zinc-400 mt-1">${j.face.status}</div><div class="mono text-xs text-zinc-500 mt-2">${j.face.detail}</div></div>
-    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">BLOCKCHAIN</div><div class="mt-2 text-sm font-medium ${j.blockchain.mode.includes('Web3')?'text-success':'text-zinc-300'}">${j.blockchain.mode}</div><div class="mono text-xs text-zinc-400 mt-1">${j.blockchain.detail||''}</div><div class="mono text-xs hash mt-2">${j.blockchain.contract_address||'— not configured'}</div></div>
+    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">BLOCKCHAIN</div><div class="mt-2 text-sm font-medium ${j.blockchain.mode.includes('Web3') && hasRealContract?'text-success': j.blockchain.mode.includes('InMemory')?'text-amber':'text-zinc-300'}">${j.blockchain.mode}</div><div class="mono text-xs text-zinc-400 mt-1">${j.blockchain.detail||''}</div><div class="mono text-xs hash mt-2 ${contractCls}">${contractDisplay}</div></div>
     <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">EVIDENCE VERIFIER</div><div class="mt-2 text-sm font-medium text-success">${j.verifier.status}</div><div class="mono text-xs text-zinc-500 mt-1">${j.verifier.detail}</div><div class="mono text-xs mt-2">data/evidence/ · data/blockchain/</div></div>
-    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">CONTRACT</div><div class="mt-2 mono text-xs hash ${j.blockchain.contract_address?'text-white':'text-zinc-500'}">${j.blockchain.contract_address||'Not configured — set CONTRACT_ADDRESS in .env'}</div><div class="text-[11px] text-zinc-600 mt-2">EvidenceRegistry.sol — register(bytes32) · verify(bytes32)</div></div>
+    <div class="card rounded-xl p-5"><div class="text-xs tracking-widest text-zinc-500">CONTRACT</div><div class="mt-2 mono text-xs hash ${hasRealContract?'text-white':'text-zinc-500'}">${contractDisplay}</div><div class="text-[11px] text-zinc-600 mt-2">EvidenceRegistry.sol — register(bytes32) · verify(bytes32)</div><div class="text-[10px] ${hasRealContract?'text-success':'text-amber'} mt-1">${hasRealContract?'ANCHORED ON BLOCKCHAIN':'IN-MEMORY ANCHOR — local only'}</div></div>
   `;
-  $('#blockchain-panel').innerHTML=`<div>Mode: <span class="text-white">${j.blockchain.mode}</span></div><div>RPC: <span class="text-cyan">${j.blockchain.rpc_url||'—'}</span></div><div>Contract: <span class="hash text-white">${j.blockchain.contract_address||'—'}</span></div><div class="text-zinc-500">Evidence hash ≠ transaction hash — only root hash anchored.</div>`;
+  $('#blockchain-panel').innerHTML=`<div>Mode: <span class="${hasRealContract?'text-success':'text-amber'}">${j.blockchain.mode}</span></div><div>RPC: <span class="text-cyan">${j.blockchain.rpc_url||'—'}</span></div><div>Contract: <span class="hash ${contractCls}">${contractDisplay}</span></div><div class="text-zinc-500">Evidence hash ≠ transaction hash — only root hash anchored. ${hasRealContract?'':'InMemory = simulated anchor only.'}</div>`;
 }
 async function loadEvidenceList(){
   const r=await fetch('/api/evidence/list'); const arr=await r.json();
-  $('#evidence-list').innerHTML = arr.map(e=>`<div class="card rounded-lg p-3 flex items-center gap-3"><div class="flex-1 min-w-0"><div class="mono text-xs hash text-white">${e.full_hash||e.evidence_hash}</div><div class="mono text-[11px] text-zinc-500">${e.name} · ${e.candidates} candidates · ${e.created_at||''}</div></div><button onclick="document.getElementById('evidence-path').value='${e.path}'; document.getElementById('btn-open-evidence').click()" class="mono text-xs px-2 py-1 rounded bg-surface border border-borderc">Inspect</button><button onclick="document.getElementById('verify-path').value='${e.path}'; document.querySelector('[data-nav=verification]').click()" class="mono text-xs px-2 py-1 rounded bg-cyan text-black">Verify</button></div>`).join('') || '<div class="mono text-xs text-zinc-500">No evidence yet — run Investigate.</div>';
+  $('#evidence-list').innerHTML = arr.map(e=>`<div class="card rounded-lg p-3 flex items-center gap-3"><div class="flex-1 min-w-0"><div class="mono text-xs hash text-white">${e.full_hash||e.evidence_hash}</div><div class="mono text-[11px] text-zinc-500">${e.name} · ${e.candidates} candidates · ${e.created_at||''}</div></div><button onclick="document.getElementById('evidence-path').value='${e.path}'; document.getElementById('btn-open-evidence').click()" class="mono text-xs px-2 py-1 rounded bg-surface border border-borderc">Inspect</button><button onclick="document.getElementById('verify-path').value='${e.path}'; setOriginalTamperSource('${e.path}'); document.querySelector('[data-nav=verification]').click()" class="mono text-xs px-2 py-1 rounded bg-cyan text-black">Verify</button></div>`).join('') || '<div class="mono text-xs text-zinc-500">No evidence yet — run Investigate.</div>';
 }
 async function loadBlockchain(){ await loadStatusPage(); }
 
@@ -399,9 +403,24 @@ $('#btn-open-evidence').addEventListener('click', async ()=>{
   $('#evidence-preview').classList.remove('hidden');
 });
 
-// Upload
+// Upload — single execution guard: label native click already triggers input, avoid double file.click
 const drop=$('#drop'), file=$('#file');
-drop.addEventListener('click', ()=> { if(!isInvestigating) file.click(); });
+let lastHandleTs = 0;
+drop.addEventListener('click', (e)=> {
+  // If click originated from the file input itself (native label behavior), don't double-trigger
+  if(e.target === file) return;
+  if(isInvestigating) { e.preventDefault(); return; }
+  // Prevent native label double-trigger on some browsers by only calling if not already triggered
+  // Check timestamp debounce 300ms
+  const now = Date.now();
+  if(now - lastHandleTs < 300) return;
+  // Only programmatic click if not already handled by label native behavior
+  // Use small timeout to let native behavior fire first; if file dialog not opened, then trigger
+  // Simplified: just rely on native label, don't call file.click() when drop is label
+  // But keep for div usage: if drop is label, native already works, so skip explicit click
+  if(drop.tagName.toLowerCase() === 'label') return;
+  file.click();
+});
 drop.addEventListener('dragover', e=>{e.preventDefault(); if(!isInvestigating) drop.classList.add('border-cyan/40')});
 drop.addEventListener('dragleave', ()=> drop.classList.remove('border-cyan/40'));
 drop.addEventListener('drop', e=>{e.preventDefault(); drop.classList.remove('border-cyan/40'); if(isInvestigating) return; if(e.dataTransfer.files[0]){file.files=e.dataTransfer.files; handleFile();}});
@@ -409,9 +428,14 @@ file.addEventListener('change', handleFile);
 
 async function handleFile(){
   if(!file.files[0] || isInvestigating) return;
+  // Debounce rapid double triggers (label native + programmatic)
+  const now = Date.now();
+  if(now - lastHandleTs < 500) return;
+  lastHandleTs = now;
   isInvestigating = true;
   const dropLabel=$('#drop');
   dropLabel.style.pointerEvents='none'; dropLabel.style.opacity='0.6';
+  file.disabled = true;
   $('#upload-meta').classList.remove('hidden');
   $('#upload-meta').innerHTML = `<span class="spinner"></span>` + file.files[0].name + ' · ' + (file.files[0].size/1024).toFixed(1)+' KB — processing…';
   $('#pipeline').classList.remove('hidden');
@@ -433,8 +457,10 @@ async function handleFile(){
     $('#s-discovery-detail').textContent=e.message.slice(0,120);
   } finally {
     isInvestigating=false;
+    file.disabled = false;
     dropLabel.style.pointerEvents=''; dropLabel.style.opacity='';
     $('#upload-meta').innerHTML = file.files[0] ? (file.files[0].name + ' · ' + (file.files[0].size/1024).toFixed(1)+' KB') : '';
+    // Clear file input to allow re-selecting same file, but keep value for display
   }
 }
 
@@ -448,14 +474,30 @@ function renderResult(j){
   $('#results').classList.remove('hidden');
   $('#query-img').src=j.query_url;
   $('#query-caption').textContent=j.query_url.split('/').pop();
-  const zeroCandidates = j.candidates.length===0;
-  if(zeroCandidates){
-    setStep('s-discovery','step-done', '0 found — sealed with 0 candidates');
-  } else {
-    setStep('s-discovery', j.discovery.candidate_count>0?'step-done':'step-done', j.discovery.candidate_count+' found · '+j.discovery.acquired_count+' acquired');
-  }
+  // Auditable distinct counts: discovery, acquisition, verification must not share same number
+  const discovered = j.discovery.candidate_count ?? 0;
+  const normalized = j.discovery.normalized_count ?? discovered;
+  const acquired = j.discovery.acquired_count ?? 0;
+  const failed = j.discovery.failed_count ?? 0;
   const verifiedCount = Object.keys(j.verification_results||{}).length;
-  setStep('s-verification','step-done', verifiedCount+' verified · buffalo_l');
+  const evidenceCount = j.candidates.length;
+  const hasFaces = j.candidates.some(c=> c.verification && c.verification.candidate_face_detected === true);
+  // DISCOVERY step: always show discovered count (fix: previously used j.candidates.length===0 to show 0 found even when discovered>0)
+  if(discovered === 0){
+    setStep('s-discovery','step-done', '0 found — no candidates discovered (search returned 0)');
+  } else if(acquired === 0){
+    setStep('s-discovery','step-done', discovered+' found · 0 acquired — all acquisitions failed');
+  } else {
+    setStep('s-discovery','step-done', discovered+' found · '+acquired+' acquired · '+failed+' failed');
+  }
+  // Verification distinct count
+  if(acquired === 0){
+    setStep('s-verification','step-done', '0 verified · no successful acquisitions');
+  } else if(verifiedCount === 0){
+    setStep('s-verification','step-done', '0 verified · buffalo_l (no faces or error)');
+  } else {
+    setStep('s-verification','step-done', verifiedCount+' verified · buffalo_l');
+  }
   // Hashing is done if evidence_hash exists, even with zero candidates
   if(j.evidence_hash){
     setStep('s-hashing','step-done', j.evidence_hash.slice(0,8)+'… sealed');
@@ -464,17 +506,52 @@ function renderResult(j){
   } else {
     setStep('s-hashing','step-active','hashing…');
   }
-  if(j.anchor){ setStep('s-anchor','step-done','block '+j.anchor.block_number); } else { setStep('s-anchor','step-pending','not anchored'); }
-  setStep('s-verify','step-pending','ready to verify');
-  $('#progress-bar').style.width=j.evidence_hash ? (j.anchor?'100%':'75%') : '40%';
-  $('#pipeline-status').innerHTML=j.anchor?'anchored':'<span class="text-success">●</span> sealed';
-
-  // candidates
-  const grid=$('#candidate-grid');
-  if(zeroCandidates){
-    grid.innerHTML=''; $('#no-candidates').classList.remove('hidden');
+  // Blockchain anchor distinct states
+  const anchorMode = j.anchor_mode || (j.anchor ? 'ANCHORED' : 'NOT REGISTERED');
+  const isInMemory = anchorMode.includes('IN-MEMORY');
+  if(j.anchor && anchorMode.includes('ANCHORED')){
+    const label = isInMemory ? 'IN-MEMORY ANCHOR' : 'ANCHORED ON BLOCKCHAIN';
+    const cls = isInMemory ? 'bg-amber/15 text-amber border-amber/30' : 'bg-success/15 text-success border-success/30';
+    setStep('s-anchor','step-done', isInMemory ? 'in-memory · block '+j.anchor.block_number : 'block '+j.anchor.block_number);
+    $('#pipeline-status').innerHTML = isInMemory ? '<span class="text-amber">●</span> in-memory sealed' : 'anchored';
+  } else if(j.anchor && isInMemory){
+    setStep('s-anchor','step-done','in-memory block '+j.anchor.block_number);
+    $('#pipeline-status').innerHTML='<span class="text-amber">●</span> in-memory sealed';
+  } else if(j.anchor){
+    setStep('s-anchor','step-done','block '+j.anchor.block_number);
+    $('#pipeline-status').innerHTML='anchored';
   } else {
-    $('#no-candidates').classList.add('hidden');
+    setStep('s-anchor','step-pending','not anchored');
+    $('#pipeline-status').innerHTML='<span class="text-success">●</span> sealed';
+  }
+  setStep('s-verify','step-pending','ready to verify');
+  const hasAnchor = j.anchor && !isInMemory;
+  $('#progress-bar').style.width=j.evidence_hash ? (hasAnchor?'100%':'75%') : '40%';
+
+  // cand-count badge distinct
+  const badgeEl = document.getElementById('cand-count');
+  if(badgeEl) badgeEl.textContent = discovered+' found · '+acquired+' acquired';
+
+  // candidates — handle zero cases distinctly (A-D)
+  const grid=$('#candidate-grid');
+  const noCandEl = document.getElementById('no-candidates');
+  if(j.candidates.length===0){
+    grid.innerHTML='';
+    if(noCandEl){
+      noCandEl.classList.remove('hidden');
+      if(discovered===0){
+        noCandEl.textContent = 'No candidates discovered — search returned 0. Evidence sealed with 0 candidates (genuine zero-result).';
+        noCandEl.className='mt-4 text-sm text-zinc-400 border border-borderc bg-surface rounded p-3';
+      } else if(acquired===0){
+        noCandEl.textContent = `Search found ${discovered} candidates but none could be acquired (${failed} failed). Evidence sealed with ${j.candidates.length} candidates.`;
+        noCandEl.className='mt-4 text-sm text-amber border border-amber/30 bg-amber/10 rounded p-3';
+      } else {
+        noCandEl.textContent = `Unexpected: discovered ${discovered}, acquired ${acquired} but evidence has 0 candidates.`;
+        noCandEl.className='mt-4 text-sm text-danger border border-danger/30 bg-danger/10 rounded p-3';
+      }
+    }
+  } else {
+    if(noCandEl) noCandEl.classList.add('hidden');
     grid.innerHTML=j.candidates.map(c=>{
       const s=c.status; const ok=s==='success';
       const v=c.verification||{}; const dec=v.decision||'—';
@@ -511,19 +588,38 @@ function renderResult(j){
   $('#ev-hashes').textContent = j.candidates.filter(c=>c.evidence_hash).length + ' ✓';
   $('#evidence-details').textContent = JSON.stringify(j.candidates.map(c=>({candidate_id:c.candidate_id, evidence_hash:c.evidence_hash, verification:c.verification, faces_detected:c.faces_detected||null})), null, 2);
   lastEvidencePath=j.evidence_path;
+  // Stable tamper source is original evidence, set once per investigation
+  if(typeof setOriginalTamperSource === 'function') setOriginalTamperSource(j.evidence_path);
   $('#btn-view-evidence').onclick=()=>{ $('#evidence-path').value=j.evidence_path; document.querySelector('[data-nav=evidence]').click(); };
 
-  // anchor
+  // anchor — use distinct modes, hide zero address
   const a=j.anchor;
-  if(a){
-    $('#anchor-status').textContent='ANCHORED'; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-success/15 text-success border border-success/30';
+  const mode = j.anchor_mode || (a ? 'IN-MEMORY ANCHOR' : 'NOT REGISTERED');
+  const displayContract = j.anchor_contract_display || null;
+  if(a && mode.includes('IN-MEMORY')){
+    $('#anchor-status').textContent='IN-MEMORY ANCHOR — local simulated anchor only (not on blockchain)'; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-amber/15 text-amber border border-amber/30';
     $('#anchor-details').classList.remove('hidden');
-    $('#anchor-contract').textContent=a.contract_address;
+    $('#anchor-contract').textContent= displayContract || '— (InMemory, no contract)';
+    $('#anchor-tx').textContent=a.transaction_hash;
+    $('#anchor-block').textContent='#'+a.block_number;
+    lastAnchor=a;
+  } else if(a && mode.includes('ANCHORED ON BLOCKCHAIN')){
+    $('#anchor-status').textContent='ANCHORED ON BLOCKCHAIN'; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-success/15 text-success border border-success/30';
+    $('#anchor-details').classList.remove('hidden');
+    $('#anchor-contract').textContent= displayContract || a.contract_address;
+    $('#anchor-tx').textContent=a.transaction_hash;
+    $('#anchor-block').textContent='#'+a.block_number;
+    lastAnchor=a;
+  } else if(a){
+    // fallback old
+    $('#anchor-status').textContent= mode; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-amber/15 text-amber border border-amber/30';
+    $('#anchor-details').classList.remove('hidden');
+    $('#anchor-contract').textContent= displayContract || a.contract_address || '— (InMemory)';
     $('#anchor-tx').textContent=a.transaction_hash;
     $('#anchor-block').textContent='#'+a.block_number;
     lastAnchor=a;
   } else {
-    $('#anchor-status').textContent='NOT REGISTERED — evidence cryptographically sealed, anchor optional'; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-amber/15 text-amber border border-amber/30';
+    $('#anchor-status').textContent='NOT REGISTERED — evidence cryptographically sealed, anchor optional'; $('#anchor-status').className='mono text-xs px-2 py-1 rounded inline-block bg-zinc-700/30 text-zinc-400 border border-borderc';
     $('#anchor-details').classList.add('hidden');
   }
 
@@ -543,11 +639,13 @@ $('#btn-verify').addEventListener('click', async ()=>{
     return;
   }
   if(!path) return;
+  // Track original for tamper demo before verifying
+  setOriginalTamperSource(path);
   const chain=$('#verify-chain').checked;
   const r=await fetch('/api/verify?chain='+(chain?'1':'0'), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path})});
   const j=await r.json(); showVerify(j);
 });
-$('#verify-file').addEventListener('change', ()=>{ if($('#verify-file').files[0]) $('#verify-path').value=$('#verify-file').files[0].name; });
+$('#verify-file').addEventListener('change', ()=>{ if($('#verify-file').files[0]) { const n=$('#verify-file').files[0].name; $('#verify-path').value=n; setOriginalTamperSource(n); } });
 
 function showVerify(j){
   if(j.error){ $('#verify-result').classList.remove('hidden'); $('#verify-badge').className='rounded-xl p-5 border bg-danger/10 border-danger/40 text-center'; $('#verify-badge').innerHTML='<div class="text-danger font-semibold">✕ VERIFICATION FAILED</div><div class="mono text-xs text-zinc-400 mt-1">'+j.error+'</div>'; return; }
@@ -572,19 +670,95 @@ function showVerify(j){
   lastEvidencePath = j.stored_hash ? ('data/evidence/evidence_'+j.stored_hash.slice(0,8)+'*.json') : lastEvidencePath;
 }
 
+// Stable original source for tamper demo — prevents 200→404 cascade
+let originalTamperSource = null;
+let isTampering = false;
+// Helper to set original source whenever verify path is set to a real evidence file
+function setOriginalTamperSource(p){
+  if(!p) return;
+  const name = p.split('/').pop();
+  if(name && !name.includes('tampered_') && !name.includes('*')){
+    // Only store non-tampered, non-wildcard as stable original
+    if(p.includes('data/evidence') || p.endsWith('.json')){
+      originalTamperSource = p;
+    }
+  }
+}
+// Monkey-patch verify-path setter tracking (also hook existing setters)
+const verifyPathEl = document.getElementById('verify-path');
+if(verifyPathEl){
+  verifyPathEl.addEventListener('change', ()=> setOriginalTamperSource(verifyPathEl.value.trim()));
+  verifyPathEl.addEventListener('input', ()=> setOriginalTamperSource(verifyPathEl.value.trim()));
+}
+// Ensure each tamper button has exactly one listener (prevent duplicates if renderResult re-runs)
 $$('.tamper-btn').forEach(b=>{
-  b.addEventListener('click', async ()=>{
+  if(b.dataset.tamperBound === '1') return;
+  b.dataset.tamperBound = '1';
+  b.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if(isTampering) return; // prevent duplicate fetches
     const field=b.dataset.tamper;
-    let path=$('#verify-path').value.trim() || lastEvidencePath || 'data/evidence/evidence_demo-e2e-0001.json';
+    // Use stable original source, never tampered copy
+    let path = originalTamperSource || $('#verify-path').value.trim() || lastEvidencePath || 'data/evidence/evidence_demo-e2e-0001.json';
+    // If current verify-path holds a tampered file, ignore it and use original
+    if(path.includes('tampered_')){
+      path = originalTamperSource || lastEvidencePath || path;
+    }
+    if(!path || path.includes('tampered_')){
+      // Fallback to evidence list
+      const r=await fetch('/api/evidence/list'); const arr=await r.json(); if(arr[0]) path=arr[0].path;
+      setOriginalTamperSource(path);
+    }
     if(path.includes('*')){
       const r=await fetch('/api/evidence/list'); const arr=await r.json(); if(arr[0]) path=arr[0].path;
+      setOriginalTamperSource(path);
     }
-    const r=await fetch('/api/tamper_demo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, field})});
-    const j=await r.json();
-    $('#verify-path').value=j.tampered_path;
-    showVerify(j.result);
+    // Ensure original stays stable
+    if(!originalTamperSource && path && !path.includes('tampered_')){
+      setOriginalTamperSource(path);
+    }
+    // Use original as payload source
+    const payloadPath = originalTamperSource || path;
+    isTampering = true;
+    b.disabled = true;
+    b.style.opacity='0.5';
+    b.style.pointerEvents='none';
+    try{
+      const r=await fetch('/api/tamper_demo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path: payloadPath, field})});
+      const j=await r.json();
+      if(!r.ok){
+        // Safe inline error, do not corrupt original source
+        showVerify({error: j.error || ('tamper failed: '+r.status), valid: false});
+        return;
+      }
+      // Show tampered path for verification display, but keep original stable for next tamper
+      // Display tampered in verify-path for visibility, but originalTamperSource unchanged
+      $('#verify-path').value=j.tampered_path;
+      // Also store tampered for verification display, but do not overwrite originalTamperSource
+      showVerify(j.result);
+    } catch(err){
+      showVerify({error: err.message, valid:false});
+    } finally {
+      isTampering=false;
+      b.disabled=false;
+      b.style.opacity='';
+      b.style.pointerEvents='';
+    }
   });
 });
+// Keep original source updated when verify succeeds or evidence selected
+const _origShowVerify = showVerify;
+showVerify = function(j){
+  // If j is error, don't update original
+  if(j && !j.error && j.stored_hash){
+    // Valid evidence verified — update lastEvidencePath but preserve originalTamperSource if already set to original
+    if(!originalTamperSource && lastEvidencePath && !lastEvidencePath.includes('tampered_')){
+      originalTamperSource = lastEvidencePath;
+    }
+  }
+  return _origShowVerify(j);
+};
 
 // init
 loadStatus(); loadEvidenceList();
