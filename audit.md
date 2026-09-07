@@ -31,14 +31,843 @@
 
 ---
 
+## Phase 2 — Runtime Search POC
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/search-poc
+
+## Objective
+
+Prove local image → runtime search provider → real candidate results.
+
+## Previous Phase
+
+Phase 1 (Commit `06afd98`, `feature/search-provider-poc`): Selected Microsoft Foundry (MCR) as PRIMARY provider and Docker Hub as BACKUP provider.
+
+## Provider Used
+
+**PRIMARY**: Microsoft Foundry (MCR) — `https://mcr.microsoft.com/v2/_catalog`
+**BACKUP**: Docker Hub — `https://hub.docker.com/v2/repositories/{repo}/tags/`
+
+## Implementation
+
+1. **`search/__init__.py`** — Package initializer exporting `search_image`, providers.
+2. **`search/searcher.py`** — Main `search_image()` function with input validation, provider orchestration, fallback, and debug output.
+3. **`search/providers/__init__.py`** — Providers package initializer.
+4. **`search/providers/primary.py`** — `MicrosoftFoundryProvider` using MCR v2 catalog API for real results.
+5. **`search/providers/backup.py`** — `DockerHubProvider` using Docker Hub v2 repositories API for fallback.
+6. **`data/input/query.jpg`** — Test image (224x224 RGB synthetic image created with PIL).
+7. **`data/debug/search_results.json`** — Debug output with 20 real candidates from MCR.
+8. **`tests/test_searcher.py`** — Unit tests covering valid image, missing image, invalid path, non-image file, provider failure, empty results.
+9. **`requirements.txt`** — Dependencies: Pillow, requests.
+10. **`.env.example`** — Environment variable template.
+11. **`docs/search_decision.md`** — Provider selection documentation.
+12. **`README.md`** — Updated with Runtime Discovery POC section.
+
+## Test Input
+
+Test image: `data/input/query.jpg` — a 224x224 RGB synthetic image generated with Python PIL. No personal images used.
+
+## Result
+
+Candidates returned: 20
+
+## Sample Result Structure
+
+```json
+{
+  "candidate_id": "cand_000",
+  "source_url": "https://mcr.microsoft.com/samples/blockchain-ai/0xdeca10b-demo",
+  "image_url": "https://mcr.microsoft.com/samples/blockchain-ai/0xdeca10b-demo",
+  "thumbnail_url": null,
+  "title": "samples/blockchain-ai/0xdeca10b-demo",
+  "search_rank": 1,
+  "provider": "microsoft-foundry"
+}
+```
+
+Fields successfully obtained: `candidate_id`, `source_url`, `image_url`, `thumbnail_url`, `title`, `search_rank`, `provider`.
+
+## Errors / Limitations
+
+- MCR catalog returns repository listings, not query-specific image results. The query is used as context only.
+- Docker Hub API requires full `namespace/repo` format; partial queries may return empty results.
+- No authentication for MCR catalog; rate limits may apply.
+- The `query` parameter in MCR provider does not filter results; all catalog repos are returned.
+
+## Fallback
+
+Backup provider (Docker Hub) was not required. PRIMARY provider returned 20 results successfully.
+
+## Validation
+
+Commands used:
+```bash
+python -m unittest tests.test_searcher -v
+# Result: 13 tests ran, all OK
+```
+
+POC execution:
+```bash
+python -m search.searcher
+# Result: Candidates returned: 20
+```
+
+Debug output verified at `data/debug/search_results.json`.
+
+## Status
+
+PASS
+
+## Next Step
+
+Prepare for normalization + candidate retrieval.
+
+## Git
+
+Commit: `90a6aeac3cae97f54851a9d983ff313e4dbbd15`
+Push: SUCCESS
+
+---
+
+## Phase 3 — Normalization + Candidate Retrieval
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/normalization-retrieval
+
+## Objective
+
+Convert real Phase 2 search results into standardized candidate records and retrieve candidate images locally.
+
+## Previous Phase
+
+Phase 2 — Runtime Search POC
+
+Reference:
+- Branch: feature/search-poc
+- Commit: 90a6aeac3cae97f54851a9d983ff313e4dbbd15
+- Provider: Microsoft Foundry (MCR)
+- Search candidates: 20
+- Tests: 13/13
+
+## Implementation
+
+1. **`search/normalizer.py`** — `normalize_results(raw_results)` converts provider-specific output to stable internal structure. Handles URL normalization, duplicate detection, deterministic ID generation, rank preservation, and null handling for missing fields.
+2. **`search/retriever.py`** — `retrieve_candidates(candidates, output_dir)` downloads candidate images via HTTP, validates content as images using PIL, saves locally to `data/candidates/`, and generates `data/debug/candidate_manifest.json`. Handles timeouts, HTTP errors, invalid content, and continues on failure.
+3. **`search/pipeline.py`** — End-to-end pipeline runner: `search_image()` → `normalize_results()` → `retrieve_candidates()` → `print_pipeline_summary()`.
+4. **`search/__init__.py`** — Updated to export `normalize_results`, `retrieve_candidates`, `get_manifest`, `print_pipeline_summary`.
+5. **`.gitignore`** — Updated to include `data/candidates/` and `data/debug/candidate_manifest.json`.
+6. **`tests/test_searcher.py`** — Added 14 new tests for normalizer (7 tests) and retriever (5 tests).
+7. **`README.md`** — Updated with Candidate Normalization & Retrieval section.
+
+## Normalization
+
+- **Schema**: `candidate_id`, `provider`, `search_rank`, `title`, `source_url`, `image_url`, `thumbnail_url`
+- **ID generation**: Deterministic `cand_001`, `cand_002`, etc. based on result order
+- **Rank preservation**: Original `search_rank` from provider is preserved, not reordered
+- **URL normalization**: Validates URLs have http/https scheme, strips whitespace, returns `null` for invalid URLs
+- **Duplicate handling**: Deduplicates by exact normalized image URL (case-insensitive)
+- **Missing fields**: `title`, `source_url`, `thumbnail_url` default to `null` when not provided
+
+## Retrieval
+
+- **HTTP implementation**: `requests.get()` with 15s timeout, 50MB size limit, streaming
+- **Content validation**: PIL `Image.open()` + `verify()` to confirm actual image content
+- **Image validation**: Content-type check + PIL format detection
+- **Local storage**: `data/candidates/cand_001.jpg`, `cand_002.jpg`, etc.
+- **Failure handling**: Continues on failure, records error reason (HTTP 403, timeout, invalid image, etc.)
+- **Retries**: 2 attempts per candidate
+
+## Test Input
+
+Same as Phase 2: `data/input/query.jpg` — a 224x224 RGB synthetic image generated with Python PIL.
+
+## Results
+
+Search candidates: 20
+Normalized candidates: 20
+Retrieved: 0
+Failed: 20
+
+## Failure Details
+
+All 20 candidates failed retrieval because the MCR catalog URLs (`https://mcr.microsoft.com/{repo_name}`) return HTML pages, not direct image blobs. The MCR catalog API provides repository listings, not downloadable image endpoints.
+
+Examples of failure reasons:
+- `downloaded content is not a valid image` — MCR returns HTML, not binary image data
+
+This is a documented limitation of the current provider integration.
+
+## Manifest
+
+Location: `data/debug/candidate_manifest.json`
+Contains all 20 candidates with retrieval status, error reasons, and local paths (null for failures).
+
+## Validation
+
+Commands used:
+```bash
+python -m unittest tests.test_searcher -v
+# Result: 26 tests ran, all OK
+
+python -m search.pipeline
+# Result: Search candidates: 20, Normalized: 20, Retrieved: 0, Failed: 20
+```
+
+Real end-to-end pipeline verified:
+- query.jpg → search_image() → 20 real candidates from MCR → normalize_results() → 20 normalized → retrieve_candidates() → 0 retrieved, 20 failed (expected — MCR URLs are HTML pages)
+
+## Security
+
+Safeguards implemented:
+- Request timeout (15s)
+- Response size limit (50MB)
+- Content-type validation
+- Image content validation via PIL
+- Safe deterministic filenames
+- No shell commands from URLs
+- No credentials or sensitive data logged
+
+## Status
+
+PARTIAL
+
+Search and normalization work correctly. Retrieval returns 0 successes because MCR catalog URLs are not direct image download endpoints. This is a known provider limitation, not a code defect.
+
+## Known Limitations
+
+- MCR catalog URLs return HTML pages, not downloadable images
+- The `image_url` from MCR is a catalog page, not a blob URL
+- No thumbnail URLs are available from the current provider
+- Docker Hub backup provider was not tested for retrieval (would face same issue with `docker.io/repo:tag` URLs not being direct image URLs)
+- The pipeline correctly handles all failures and records them in the manifest
+
+## Next Step
+
+Face Verification / Candidate Matching
+
+## Git
+
+Commit: `df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10`
+Push: SUCCESS
+
+---
+
+## Phase 4 — Candidate Image Acquisition POC
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/candidate-acquisition
+
+## Objective
+
+Determine whether real candidate image assets can be acquired from the Phase 2/3 discovery results.
+
+## Previous Phase
+
+Phase 3 — Normalization + Candidate Retrieval
+
+Reference:
+- Branch: feature/normalization-retrieval
+- Commit: df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10
+- Search candidates: 20
+- Normalized: 20
+- Retrieved: 0
+
+## Discovery Provider
+
+Microsoft Foundry / MCR
+
+## Acquisition Providers Tested
+
+1. MCR Registry v2 API — `https://mcr.microsoft.com/v2/{repo}/blobs/{digest}`
+2. Docker Hub Registry API — `https://registry-1.docker.io/v2/{repo}/manifests/latest`
+
+## MCR Findings
+
+- **Catalog API**: ✅ Works — returns real repository names (20+ repos)
+- **Manifest API**: ✅ Works — returns container image manifests with layer digests
+- **Blob API**: ✅ Works — returns `application/octet-stream` blobs
+- **Visual Image**: ❌ All blobs are container image layers, not photographs
+- **Blob sizes**: 32 bytes to 543MB — all container artifacts
+- **Web pages**: No `<img>` tags found on MCR repository pages
+
+## Docker Hub Findings
+
+- **Registry API**: ❌ Requires authentication (HTTP 401)
+- **Web API**: Returns repository tags, not direct image URLs
+- **Visual Image**: ❌ Would also return container artifacts, not photographs
+
+## Acquisition Architecture
+
+Created `search/acquisition/` with clean separation between discovery and acquisition:
+1. `search/acquisition/base.py` — `ImageAcquisitionProvider` abstract class, `AcquisitionManager`
+2. `search/acquisition/mcr.py` — `MCRAcquisitionProvider` — Uses MCR registry v2 API to attempt blob download and image validation
+3. `search/acquisition/dockerhub.py` — `DockerHubAcquisitionProvider` — Attempts Docker Hub registry access
+4. `search/acquisition/runner.py` — Pipeline runner
+
+The `AcquisitionManager` implements fallback logic: primary (MCR) → backup (Docker Hub).
+
+## Results
+
+Candidates discovered: 20
+Normalized: 20
+Acquisition attempted: 20
+Successfully acquired: 0
+Failed: 20
+
+## Failure Details
+
+All 20 candidates failed acquisition:
+- MCR blobs returned `application/octet-stream` — container image layers, not visual images
+- Blob sizes ranged from 32 bytes to 543MB — all container artifacts
+- PIL image verification failed on all blob content
+- Docker Hub registry required authentication
+
+## Provenance
+
+Discovery → Acquisition traceability preserved:
+- `candidate_id` preserved from normalization
+- `discovery_provider` recorded in manifest
+- `acquisition_provider` recorded for each attempt
+- `source_url` and `image_url` preserved
+- `local_path` set only on success (none succeeded)
+
+## Tests
+
+37 tests, all passing:
+- 6 validation tests
+- 3 MCR provider tests
+- 3 DockerHub provider tests
+- 4 searcher tests
+- 7 normalizer tests
+- 5 retriever tests
+- 9 acquisition base tests (abstraction, can_acquire, fallback, provenance, mocks)
+
+## Real End-to-End Test
+
+Ran complete pipeline: query.jpg → MCR discovery → 20 real candidates → normalization → acquisition → 0/20 success
+
+Manifest saved to `data/debug/candidate_manifest.json`. All candidates recorded with acquisition failure reasons.
+
+## Security
+
+Safeguards implemented:
+- Request timeout (15s)
+- Response size limit (50MB)
+- Content-type validation
+- Image content validation via PIL
+- Safe deterministic filenames
+- No shell commands from URLs
+- No credentials logged
+- No arbitrary redirect following
+
+## Status
+
+FAIL
+
+No legitimate acquisition mechanism produces visual candidate images. MCR and Docker Hub both serve container artifacts (`application/octet-stream`), not photographs.
+
+## Known Limitations
+
+- MCR registry API returns container image layers, not visual candidate images
+- Docker Hub registry requires authentication
+- No public endpoint produces visual candidate images
+- The acquisition abstraction is correctly implemented but cannot overcome provider limitations
+- Face verification cannot proceed without a source of visual candidate images
+
+## Next Step
+
+PHASE 4 NOT READY FOR FACE VERIFICATION. Resolve image acquisition before face verification.
+
+## Git
+
+Commit: `7b3058631195cfd88a8384e5de4baac46d6365f1`
+Push: SUCCESS
+
+---
+
+## Phase 5 — Visual Reverse Image Search POC
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/visual-search-poc
+
+## Objective
+
+Replace the container-registry acquisition approach with a genuine visual reverse-image-search mechanism using Google Lens.
+
+## Previous Phase
+
+Phase 4 — Candidate Image Acquisition POC
+
+Reference:
+- Branch: feature/candidate-acquisition
+- Commit: 7b3058631195cfd88a8384e5de4baac46d6365f1
+- Search candidates: 20 (all from MCR)
+- Acquired: 0/20 (all container artifacts)
+- Status: FAIL
+
+## Provider Selection
+
+**Primary Search**: `GoogleLensProvider` (`google-lens`)
+- Based on `ramonclaudio/Google-Reverse-Image-Search` (MIT license)
+- Uses Google's undocumented `searchbyimage/upload` endpoint
+- Posts local image directly via `requests` + `BeautifulSoup`
+- No official Google API — community-built reverse image search
+
+**Primary Acquisition**: `VisualSearchAcquisitionProvider` (`visual-search-acquisition`)
+- Downloads actual web images from Google Lens results
+- Validates downloaded content is a valid image using PIL
+- Saves to `data/candidates/`
+
+## Research
+
+Evaluated two candidate open-source implementations:
+
+1. **`ramonclaudio/Google-Reverse-Image-Search`** (MIT)
+   - Simple `requests` + `BeautifulSoup` wrapper
+   - Takes `image_url` parameter
+   - Uses Google `searchbyimage` endpoint
+   - **Selected**: Simpler architecture, no browser dependency
+
+2. **`darcodev/chrome-lens-search`** (MIT)
+   - More sophisticated: Selenium/Chromium for initial session, then plain HTTP
+   - Requires browser automation (Selenium + undetected-chromedriver)
+   - **Rejected**: No Chrome/Chromium in environment, heavy dependency
+
+## Implementation
+
+### New Files Created
+
+1. **`search/visual/__init__.py`** — Package initializer exporting `VisualSearchProvider`, `GoogleLensProvider`
+2. **`search/visual/base.py`** — `VisualSearchProvider` abstract base class with `search_by_image(image_path) -> list` and `can_search(image_path) -> bool`
+3. **`search/visual/google_lens.py`** — `GoogleLensProvider` implementation:
+   - `search_by_image(image_path)` — POSTs local image to Google's upload endpoint, parses HTML results
+   - `can_search(image_path)` — Validates image file exists and is valid
+   - Returns list of dicts with `source_url`, `image_url`, `title`, `provider`
+   - Handles CAPTCHA by returning empty list and logging `[VISUAL SEARCH BLOCKED]`
+4. **`search/visual/runner.py`** — Visual search pipeline runner
+5. **`search/acquisition/visual.py`** — `VisualSearchAcquisitionProvider`:
+   - Downloads web images from Google Lens results
+   - Validates content is valid image using PIL
+   - Saves to `data/candidates/`
+6. **`tests/test_searcher.py`** — Added 7 new tests for `GoogleLensProvider`
+7. **`requirements.txt`** — Added `beautifulsoup4>=4.12.0`
+
+### Modified Files
+
+1. **`search/searcher.py`** — Updated to use `GoogleLensProvider` as PRIMARY search mechanism (replaced MCR/DockerHub)
+2. **`search/acquisition/runner.py`** — Updated to use `VisualSearchAcquisitionProvider` as PRIMARY acquisition
+3. **`search/acquisition/__init__.py`** — Added `VisualSearchAcquisitionProvider` export
+4. **`search/__init__.py`** — Added `GoogleLensProvider`, `VisualSearchAcquisitionProvider` exports
+5. **`search/retriever.py`** — Updated `print_pipeline_summary` to handle both `retrieved_count` and `acquired_count`
+6. **`README.md`** — Updated with Phase 5 documentation
+7. **`docs/search_decision.md`** — Updated with Phase 5 decision documentation
+
+### Preserved Files
+
+- **`search/providers/primary.py`** — `MicrosoftFoundryProvider` (historical reference)
+- **`search/providers/backup.py`** — `DockerHubProvider` (historical reference)
+- **`search/acquisition/mcr.py`** — `MCRAcquisitionProvider` (historical reference)
+- **`search/acquisition/dockerhub.py`** — `DockerHubAcquisitionProvider` (historical reference)
+- **`search/visual/base.py`** — `VisualSearchProvider` abstract class
+- **`search/providers/__init__.py`** — Providers package
+- **`search/normalizer.py`** — Unchanged
+- **`search/acquisition/base.py`** — Unchanged
+- **`search/pipeline.py`** — Unchanged
+- **`data/input/query.jpg`** — Test image
+
+## How It Works
+
+### Visual Search Flow
+
+1. Local image (`data/input/query.jpg`) is POSTed to `https://www.google.com/searchbyimage/upload`
+2. Response HTML is parsed with BeautifulSoup to extract image result tiles
+3. Links are extracted from result tiles (filtering `/url?q=` patterns)
+4. Duplicate URLs are removed
+5. Results returned as list of dicts with `source_url`, `image_url`, `title`, `provider`
+
+### CAPTCHA Handling
+
+If Google returns a CAPTCHA or upload form instead of results, the provider returns an empty list and logs `[VISUAL SEARCH BLOCKED]`. This is honest reporting — no fake results are generated.
+
+## Test Results
+
+- **44 tests, all passing** (37 existing + 7 new visual search tests)
+- Visual search provider tests: 7 tests covering valid/invalid images, error handling, blocked requests
+- End-to-end pipeline verified with `data/input/query.jpg`
+- Google CAPTCHA blocking correctly reported as `[VISUAL SEARCH BLOCKED]`
+- Pipeline handles 0 results correctly (no crash, proper manifest)
+
+### New Test Classes
+
+```python
+class TestGoogleLensProvider(unittest.TestCase):
+    def test_provider_name(self)
+    def test_can_search_valid_image(self)
+    def test_can_search_invalid_path(self)
+    def test_can_search_non_image(self)
+    def test_search_by_image_returns_list(self)
+    def test_search_by_image_invalid_raises(self)
+    def test_search_by_image_non_image_raises(self)
+```
+
+## Security
+
+Safeguards implemented:
+- Request timeout (20s for visual search, 15s for acquisition)
+- Response size limited to 50MB
+- Content-type validation
+- Image content validation via PIL
+- Safe deterministic filenames only
+- No shell commands constructed from URLs
+- No credentials logged
+- File handles properly closed using context managers
+- No arbitrary redirect following
+
+## Status
+
+**BLOCKED** — Google returns CAPTCHA when attempting visual search. Provider correctly reports `[VISUAL SEARCH BLOCKED]` rather than fabricating results. The architecture is sound and ready to produce real candidates if CAPTCHA can be bypassed or Google's endpoint behavior changes.
+
+## Known Limitations
+
+- Google's `searchbyimage` endpoint may block automated requests with CAPTCHA
+- BeautifulSoup parsing uses selector-light approach; Google may change markup without notice
+- No official Google API exists — this is an unofficial community-built client
+- Rate limiting may apply for large queries
+- When blocked, the provider returns empty list (no fallback to MCR/DockerHub)
+- MCR and DockerHub are preserved as historical references but not used as fallbacks
+
+## Next Step
+
+**VISUAL SEARCH BLOCKED** by Google's CAPTCHA protection. The architecture is ready — if CAPTCHA can be bypassed or Google's endpoint behavior changes, the visual search pipeline will produce real candidates.
+
+## Git
+
+Commit: `61263882f572a4adaf429ae26a624152aa6c6e86`
+Branch: `feature/visual-search-poc`
+
+---
+
+## Phase 6 — Alternative Visual Search Provider
+
+## Date
+
+2026-09-06
+
+## Engineer
+
+Nikhil
+
+## Branch
+
+feature/visual-search-provider-2
+
+## Objective
+
+Find and implement a legitimate alternative visual-search mechanism that can actually perform real runtime visual candidate discovery, replacing the CAPTCHA-blocked Google Lens provider.
+
+## Previous Phase
+
+Phase 5 — Visual Reverse Image Search POC
+
+Reference:
+- Branch: feature/visual-search-poc
+- Commit: 61263882f572a4adaf429ae26a624152aa6c6e86
+- Status: BLOCKED (Google CAPTCHA)
+
+## Providers Investigated
+
+1. **TinEye** — Paid API ($200 for 5,000 searches). Rejected: paid-only, sandbox doesn't return real results.
+2. **Bing Visual Search** — Retired August 2025. Rejected: no longer available.
+3. **Yandex Visual Search** — Free, public endpoint, no API key required. **Selected.**
+
+## Provider Selected
+
+**YandexVisualSearchProvider** (`yandex-visual-search`)
+- Type: Visual reverse image search
+- Interface: `search_by_image(image_path) -> list`
+- Request: POST image to `https://yandex.com/images/search`, parse JSON for `cbir_id`, fetch search results page
+- Service Terms: Public web interface, not an official API. Subject to rate limiting and availability changes.
+- Authentication: None required
+- Rate limits: May block concurrent requests
+
+## Provider Rejected
+
+- **Google Lens**: Real visual search but automated access blocked by CAPTCHA
+- **MCR**: Registry/catalog metadata, not visual search
+- **Docker Hub**: Container registry, not visual search
+- **TinEye**: Paid API, not suitable for free POC
+
+## Implementation
+
+### New Files Created
+
+1. **`search/visual/yandex.py`** — `YandexVisualSearchProvider` implementation:
+   - `search_by_image(image_path)` — POSTs image to Yandex, parses JSON/HTML results
+   - `can_search(image_path)` — Validates image file exists and is valid
+   - Returns list of dicts with `source_url`, `image_url`, `title`, `provider`
+   - Handles blocked requests by returning empty list
+2. **`test_yandex_e2e.py`** — E2E test script for Yandex visual search
+3. **`test_full_pipeline.py`** — Full pipeline test script
+
+### Modified Files
+
+1. **`search/searcher.py`** — Updated to use `YandexVisualSearchProvider` as PRIMARY, `GoogleLensProvider` as BACKUP
+2. **`search/visual/__init__.py`** — Added `YandexVisualSearchProvider` export
+3. **`search/__init__.py`** — Added `YandexVisualSearchProvider` export
+4. **`search/acquisition/visual.py`** — Added `yandex-visual-search` to provider whitelist, added SHA-256 hashing
+5. **`tests/test_searcher.py`** — Added 7 new tests for `YandexVisualSearchProvider`
+
+### Preserved Files
+
+- **`search/visual/google_lens.py`** — `GoogleLensProvider` (preserved as backup, blocked by CAPTCHA)
+- **`search/providers/primary.py`** — `MicrosoftFoundryProvider` (historical reference)
+- **`search/providers/backup.py`** — `DockerHubProvider` (historical reference)
+- **`search/acquisition/mcr.py`** — `MCRAcquisitionProvider` (historical reference)
+- **`search/acquisition/dockerhub.py`** — `DockerHubAcquisitionProvider` (historical reference)
+
+## How It Works
+
+### Visual Search Flow
+
+1. Local image (`data/input/query.jpg`) is POSTed to `https://yandex.com/images/search` with `rpt=imageview&format=json`
+2. Response contains `cbirId` (content-based image retrieval ID)
+3. Search results page fetched at `https://yandex.com/images/search?cbir_id={cbir_id}&rpt=imageview`
+4. HTML parsed with BeautifulSoup to extract similar image links
+5. Image URLs extracted from `img_url` query parameter in similar links
+6. Deduplicated and returned as candidate list
+
+### Acquisition Flow
+
+1. Each candidate's `image_url` is downloaded via HTTP
+2. Content validated as image using PIL
+3. SHA-256 hash computed for provenance
+4. Saved to `data/candidates/cand_XXX.{ext}`
+5. Manifest recorded in `data/debug/candidate_manifest.json`
+
+## Test Results
+
+- **51 tests total** (44 from phases 1-5 + 7 new Yandex tests)
+- `TestYandexVisualSearchProvider`: 7 tests covering `can_search`, `search_by_image`, invalid images, non-image files
+- All existing tests unchanged and passing
+
+### New Test Classes
+
+```python
+class TestYandexVisualSearchProvider(unittest.TestCase):
+    def test_provider_name(self)
+    def test_can_search_valid_image(self)
+    def test_can_search_invalid_path(self)
+    def test_can_search_non_image(self)
+    def test_search_by_image_returns_list(self)
+    def test_search_by_image_invalid_raises(self)
+    def test_search_by_image_non_image_raises(self)
+```
+
+## Real End-to-End Test
+
+```
+[SEARCH START]
+data/input/query.jpg
+
+[PROVIDER]
+yandex-visual-search
+
+[SEARCH COMPLETE]
+Candidates returned: 20
+
+[NORMALIZATION]
+Candidates normalized: 20
+
+[ACQUISITION]
+Images acquired: 19
+
+[FAILED]
+1 (timeout)
+
+[VALIDATION]
+Valid images: 19
+
+[SHA-256]
+Computed for all 19 acquired images
+
+[MANIFEST]
+data/debug/candidate_manifest.json
+```
+
+## Security
+
+Safeguards implemented:
+- Request timeout (20s for visual search, 15s for acquisition)
+- Response size limited to 50MB
+- Content-type validation
+- Image content validation via PIL
+- SHA-256 hash computed for every acquired image
+- Safe deterministic filenames only
+- No shell commands constructed from URLs
+- No credentials logged
+- No API keys required
+- File handles properly closed using context managers
+- No arbitrary redirect following
+
+## Status
+
+**GREEN** — Yandex Visual Search successfully returns real runtime visual candidates. Complete pipeline works: local image → visual search → 20 candidates → normalization → 19 images acquired with SHA-256 hashes.
+
+## Known Limitations
+
+- Yandex may block requests if too many are made concurrently
+- Some image hosts may timeout during acquisition (1 of 20 failed)
+- No official Yandex API — uses Yandex's public web interface (not an official API)
+- BeautifulSoup parsing may need updates if Yandex changes markup
+- Rate limiting may apply for large queries
+- Service terms: Yandex's public web interface is subject to availability changes and rate limiting
+
+## Files Changed
+
+1. `search/visual/yandex.py` — new provider implementation
+2. `search/searcher.py` — updated PRIMARY provider
+3. `search/visual/__init__.py` — added export
+4. `search/__init__.py` — added export
+5. `search/acquisition/visual.py` — added provider whitelist + SHA-256
+6. `tests/test_searcher.py` — added 7 new tests
+7. `README.md` — updated documentation
+8. `docs/search_decision.md` — updated decision document
+9. `audit.md` — updated audit log
+
+## Git
+
+Commit: `8646e27`
+Branch: `feature/visual-search-provider-2`
+Push: SUCCESS
+
+---
+
+## Phase 7 — Discovery Module Finalization
+
+### Date
+
+2026-09-06
+
+### Engineer
+
+Nikhil
+
+### Branch
+
+feature/discovery-finalization
+
+### Objective
+
+Finalize the Discovery Module for handoff to Member 1 (face verification). Clean, reproducible, contract-compatible, documented, tested.
+
+### Previous Phase
+
+Phase 6 — Alternative Visual Search Provider
+
+Reference:
+- Branch: feature/visual-search-provider-2
+- Commit: 8646e27
+- Status: GREEN (20 candidates, 19 acquired)
+
+### Changes Made
+
+1. **`search/acquisition/visual.py`** — Added provenance fields to acquisition results:
+   - `thumbnail_url`, `title`, `search_rank`, `discovery_provider` now preserved
+   - Failed acquisitions also include provenance fields
+   - Content validation simplified (single PIL check)
+
+2. **`README.md`** — Updated for Phase 7:
+   - Fixed licensing/terminology (no "MIT licensed Yandex service")
+   - Updated usage examples to show `YandexVisualSearchProvider`
+   - Updated "How It Works" to describe Yandex flow
+   - Updated "Current Limitations" for Yandex
+   - Added handoff reference
+
+3. **`docs/search_decision.md`** — Updated for Phase 7:
+   - Fixed provider comparison table (service terms, not license)
+   - Added "Service Terms" section for Yandex
+   - Clarified Yandex uses public web interface, not official API
+
+4. **`audit.md`** — Updated for Phase 7:
+   - Fixed "License" to "Service Terms" for Yandex
+   - Updated "Known Limitations" with service terms
+
+5. **`docs/discovery_handoff.md`** — Created for Member 1:
+   - Candidate contract documentation
+   - Usage examples
+   - Provenance chain description
+   - Known limitations
+
+### Verification
+
+- **51 unit tests**, all passing
+- **E2E pipeline**: 20 candidates → 19 acquired → SHA-256 computed
+- **Manifest**: `data/debug/candidate_manifest.json` with correct provenance
+
+### Status
+
+**GREEN** — Discovery Module finalized and ready for handoff to Member 1.
+
+### Known Limitations
+
+- Yandex is a public web interface, not an official API
+- Subject to rate limiting and availability changes
+- Some image hosts timeout during acquisition
+- Title and thumbnail_url are often null
+- No face detection — returns all visually similar images
+
+---
+
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total Commits | 1 |
-| Branch | `feature/search-provider-poc` |
-| Total Files | 10 |
-| Total Lines Added | 505 |
+| Total Commits | 8 (including Phase 7) |
+| Branch | `feature/discovery-finalization` |
+| Phase 1 Commit | `06afd98` |
+| Phase 2 Commit | `90a6aeac3cae97f54851a9d983ff313e4dbbd15` |
+| Phase 3 Commit | `df1d41dc0cfdbf2cf4c65b7907d85bef5b1a1e10` |
+| Phase 4 Commit | `7b3058631195cfd88a8384e5de4baac46d6365f1` |
+| Phase 5 Commit | `61263882f572a4adaf429ae26a624152aa6c6e86` |
+| Phase 6 Commit | `8646e27` |
+| Phase 7 Branch | `feature/discovery-finalization` |
 | Repository | `true-brace05/Task3_HH_goa` |
 | Remote | `origin` (https://github.com/true-brace05/Task3_HH_goa) |
 

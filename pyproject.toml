@@ -10,4 +10,4 @@ requires-python = ">=3.10"
 dependencies = []
 
 [tool.setuptools.packages.find]
-include = ["search_provider*"]
+include = ["search_provider*", "search*", "evidence*", "blockchain*", "config*", "utils*", "verifier*", "verification*", "face*"]

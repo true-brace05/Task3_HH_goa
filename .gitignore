@@ -10,3 +10,11 @@ build/
 *.swp
 *.swo
 *~
+data/input/query.jpg
+search_results.json
+data/candidates/
+data/debug/candidate_manifest.json
+data/evidence/
+data/blockchain/
+contracts/artifacts/deployment.json
+test_visual_e2e.py
