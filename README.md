@@ -272,5 +272,11 @@ Confirmed from code/tests and existing `/tmp` artifacts (not mocked):
 
 MIT — see [LICENSE](LICENSE).
 
+## 🎥 Project Demo
+
+A complete walkthrough of our end-to-end pipeline, demonstrating reverse image discovery, multi-candidate face verification, evidence generation, SHA-256 hashing, independent verification, and tamper detection.
+
+▶️ [Watch the Demo Video on YouTube](https://youtu.be/cg4vpDRE6Fc?si=E8MHoikUKPNWJ8k5)
+
 
 
